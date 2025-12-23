@@ -92,11 +92,26 @@ export function UserManagementPanel() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, full_name, avatar_url, role, created_at')
+        .select(`
+          id, 
+          email, 
+          full_name, 
+          avatar_url, 
+          role,
+          created_at,
+          roles (name)
+        `)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setUsers(data || []);
+      
+      // Map role từ roles table nếu có, fallback về role field
+      const usersWithRole = (data || []).map(user => ({
+        ...user,
+        role: (user.roles as any)?.name || user.role || 'user',
+      }));
+      
+      setUsers(usersWithRole);
     } catch (error) {
       console.error('Error loading users:', error);
       toast({
@@ -189,7 +204,25 @@ export function UserManagementPanel() {
 
       // Chỉ super_admin mới được đổi role
       if (isSuperAdmin && editRole !== editingUser.role) {
+        // Cập nhật cả role (legacy) và role_id (new system)
         updateData.role = editRole;
+        
+        // Lấy role_id từ bảng roles
+        const roleNameMap: Record<string, string> = {
+          'user': 'member',
+          'admin': 'admin', 
+          'super_admin': 'super_admin',
+        };
+        
+        const { data: roleData } = await supabase
+          .from('roles')
+          .select('id')
+          .eq('name', roleNameMap[editRole] || 'member')
+          .single();
+        
+        if (roleData?.id) {
+          updateData.role_id = roleData.id;
+        }
       }
 
       const { error } = await supabase
@@ -376,7 +409,14 @@ export function UserManagementPanel() {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Edge function error:', error);
+        // Kiểm tra nếu là lỗi Edge Function không tồn tại hoặc chưa deploy
+        if (error.message?.includes('non-2xx') || error.message?.includes('FunctionsHttpError')) {
+          throw new Error('Edge Function chưa được deploy hoặc có lỗi. Vui lòng liên hệ admin để kiểm tra.');
+        }
+        throw error;
+      }
       if (data?.error) throw new Error(data.error);
 
       toast({
@@ -406,6 +446,8 @@ export function UserManagementPanel() {
     switch (role) {
       case 'super_admin': return 'bg-purple-100 text-purple-800';
       case 'admin': return 'bg-blue-100 text-blue-800';
+      case 'member': return 'bg-gray-100 text-gray-800';
+      case 'user': return 'bg-gray-100 text-gray-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -414,6 +456,8 @@ export function UserManagementPanel() {
     switch (role) {
       case 'super_admin': return 'Super Admin';
       case 'admin': return 'Admin';
+      case 'member': return 'Member';
+      case 'user': return 'Member';
       default: return 'Member';
     }
   };

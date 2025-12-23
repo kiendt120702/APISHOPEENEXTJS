@@ -1,8 +1,9 @@
 /**
  * Dashboard - Modern Single Page App with URL Routing
+ * Hỗ trợ Demo Mode cho Shopee API Review
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useShopeeAuth } from '@/hooks/useShopeeAuth';
@@ -13,6 +14,10 @@ import UserProfilePanel from '@/components/panels/UserProfilePanel';
 
 import AuthPage from '@/pages/Auth';
 import { cn } from '@/lib/utils';
+import { isDemoAccount, DEMO_SHOP, DEMO_TOKEN } from '@/lib/demoData';
+import { DemoModeBanner } from '@/components/demo/DemoModeBanner';
+import { DemoDashboard } from '@/components/demo/DemoDashboard';
+import { ShopConnectionDialog } from '@/components/profile/ShopConnectionDialog';
 
 type MenuId = 'dashboard' | 'flash-sale' | 'ads' | 'profile';
 
@@ -242,83 +247,260 @@ function ConnectShopBanner({ onConnect, error, isLoading, canConnect }: { onConn
   );
 }
 
-// Dashboard Panel - Giới thiệu các chức năng (đơn giản)
+// Dashboard Panel - Tổng quan với thống kê và thông tin chi tiết
 function DashboardPanel({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const features = [
-    {
-      path: '/flash-sale',
-      icon: <FlameIcon />,
-      title: 'Flash Sale',
-      description: 'Quản lý Flash Sale và hẹn giờ tự động đăng ký',
-    },
-    {
-      path: '/ads',
-      icon: <AdsIcon />,
-      title: 'Quảng cáo',
-      description: 'Quản lý chiến dịch và lên lịch ngân sách tự động',
-    },
-    {
-      path: '/profile',
-      icon: <UserIcon />,
-      title: 'Tài khoản',
-      description: 'Xem thông tin tài khoản và shop đã kết nối',
-    },
-  ];
+  const { token, shops } = useShopeeAuth();
+  const { user, profile } = useAuth();
+  
+  const currentShop = shops.find(s => s.shop_id === token?.shop_id);
+  const shopName = currentShop?.shop_name || `Shop ${token?.shop_id}`;
 
   return (
-    <div className="p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* Welcome */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold">β</span>
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-800">Chào mừng đến BETACOM</h1>
-              <p className="text-sm text-slate-500">Công cụ quản lý Shop Shopee</p>
+    <div className="p-6 space-y-6">
+      {/* Welcome Banner */}
+      <div className="bg-gradient-to-r from-orange-500 to-red-500 rounded-2xl p-6 text-white">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold mb-2">
+              Xin chào, {profile?.full_name || user?.email?.split('@')[0]}! 👋
+            </h1>
+            <p className="text-orange-100 text-sm">
+              Chào mừng bạn đến với BETACOM - Công cụ quản lý Shop Shopee
+            </p>
+            {token?.shop_id && (
+              <div className="mt-4 flex items-center gap-2 bg-white/20 rounded-lg px-3 py-2 w-fit">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+                <span className="text-sm font-medium">{shopName}</span>
+              </div>
+            )}
+          </div>
+          <div className="hidden md:block">
+            <div className="w-24 h-24 bg-white/20 rounded-2xl flex items-center justify-center">
+              <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
             </div>
           </div>
-          <p className="text-slate-600 text-sm">
-            Quản lý shop Shopee hiệu quả với các công cụ tự động hóa Flash Sale, quảng cáo và theo dõi sản phẩm.
-          </p>
         </div>
+      </div>
 
-        {/* Features */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {features.map((feature) => (
-            <button
-              key={feature.path}
-              onClick={() => onNavigate(feature.path)}
-              className="bg-white rounded-xl p-4 border border-slate-200 hover:border-orange-300 hover:bg-orange-50/50 transition-all text-left group"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 group-hover:bg-orange-100 group-hover:text-orange-600 transition-colors">
-                  {feature.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-medium text-slate-800 group-hover:text-orange-600 transition-colors">
-                    {feature.title}
-                  </h3>
-                  <p className="text-xs text-slate-500 truncate">{feature.description}</p>
-                </div>
-                <svg className="w-4 h-4 text-slate-300 group-hover:text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          }
+          label="Flash Sale"
+          value="Quản lý"
+          color="orange"
+          onClick={() => onNavigate('/flash-sale')}
+        />
+        <StatCard
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+          label="Hẹn giờ"
+          value="Tự động"
+          color="blue"
+          onClick={() => onNavigate('/flash-sale')}
+        />
+        <StatCard
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+            </svg>
+          }
+          label="Quảng cáo"
+          value="Campaigns"
+          color="purple"
+          onClick={() => onNavigate('/ads')}
+        />
+        <StatCard
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+          label="Ngân sách"
+          value="Scheduler"
+          color="green"
+          onClick={() => onNavigate('/ads')}
+        />
+      </div>
+
+      {/* Quick Actions */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Flash Sale Section */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
+                <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </div>
+              <div>
+                <h3 className="font-semibold text-slate-800">Flash Sale Manager</h3>
+                <p className="text-xs text-slate-500">Quản lý & hẹn giờ đăng ký</p>
+              </div>
+            </div>
+            <button
+              onClick={() => onNavigate('/flash-sale')}
+              className="text-sm text-orange-600 hover:text-orange-700 font-medium flex items-center gap-1"
+            >
+              Xem chi tiết
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
             </button>
-          ))}
+          </div>
+          <div className="p-4 space-y-3">
+            <FeatureItem
+              icon="🔥"
+              title="Xem Flash Sale"
+              description="Danh sách Flash Sale đang mở đăng ký"
+            />
+            <FeatureItem
+              icon="⏰"
+              title="Hẹn giờ tự động"
+              description="Đặt lịch đăng ký sản phẩm vào Flash Sale"
+            />
+            <FeatureItem
+              icon="📊"
+              title="Theo dõi kết quả"
+              description="Xem trạng thái đăng ký và kết quả"
+            />
+          </div>
         </div>
 
-        {/* Quick Info */}
-        <div className="bg-slate-50 rounded-xl border border-slate-200 p-4">
-          <h4 className="font-medium text-slate-700 mb-2 text-sm">Hướng dẫn nhanh</h4>
-          <ul className="text-sm text-slate-600 space-y-1">
-            <li>• Kết nối shop Shopee để sử dụng các tính năng</li>
-            <li>• Dùng menu bên trái để điều hướng</li>
-            <li>• Dữ liệu đồng bộ trực tiếp từ Shopee API</li>
-          </ul>
+        {/* Ads Section */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-800">Ads Manager</h3>
+                <p className="text-xs text-slate-500">Quản lý chiến dịch quảng cáo</p>
+              </div>
+            </div>
+            <button
+              onClick={() => onNavigate('/ads')}
+              className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+            >
+              Xem chi tiết
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+          <div className="p-4 space-y-3">
+            <FeatureItem
+              icon="📈"
+              title="Quản lý Campaigns"
+              description="Xem và điều chỉnh chiến dịch quảng cáo"
+            />
+            <FeatureItem
+              icon="💰"
+              title="Lên lịch ngân sách"
+              description="Tự động thay đổi ngân sách theo lịch"
+            />
+            <FeatureItem
+              icon="⚡"
+              title="Bật/Tắt nhanh"
+              description="Điều khiển trạng thái chiến dịch"
+            />
+          </div>
         </div>
+      </div>
+
+      {/* API Integration Info */}
+      <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl border border-slate-200 p-6">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm">
+            <svg className="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-slate-800 mb-1">Tích hợp Shopee Open Platform API</h3>
+            <p className="text-sm text-slate-600 mb-3">
+              Dữ liệu được đồng bộ trực tiếp từ Shopee thông qua API chính thức, đảm bảo tính chính xác và real-time.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <span className="text-xs px-2 py-1 bg-white rounded-full text-slate-600 border border-slate-200">
+                🔐 Bảo mật OAuth 2.0
+              </span>
+              <span className="text-xs px-2 py-1 bg-white rounded-full text-slate-600 border border-slate-200">
+                ⚡ Real-time Sync
+              </span>
+              <span className="text-xs px-2 py-1 bg-white rounded-full text-slate-600 border border-slate-200">
+                🛡️ Official API
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Stat Card Component
+function StatCard({ 
+  icon, 
+  label, 
+  value, 
+  color, 
+  onClick 
+}: { 
+  icon: React.ReactNode; 
+  label: string; 
+  value: string; 
+  color: string;
+  onClick?: () => void;
+}) {
+  const colorClasses: Record<string, string> = {
+    orange: 'bg-orange-100 text-orange-600 group-hover:bg-orange-200',
+    blue: 'bg-blue-100 text-blue-600 group-hover:bg-blue-200',
+    purple: 'bg-purple-100 text-purple-600 group-hover:bg-purple-200',
+    green: 'bg-green-100 text-green-600 group-hover:bg-green-200',
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      className="bg-white rounded-xl border border-slate-200 p-4 text-left hover:border-slate-300 hover:shadow-sm transition-all group"
+    >
+      <div className="flex items-center gap-3">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${colorClasses[color]}`}>
+          {icon}
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">{label}</p>
+          <p className="text-sm font-semibold text-slate-800">{value}</p>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// Feature Item Component
+function FeatureItem({ icon, title, description }: { icon: string; title: string; description: string }) {
+  return (
+    <div className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
+      <span className="text-lg">{icon}</span>
+      <div>
+        <p className="text-sm font-medium text-slate-700">{title}</p>
+        <p className="text-xs text-slate-500">{description}</p>
       </div>
     </div>
   );
@@ -334,7 +516,23 @@ const Index = () => {
   
   // Auth states
   const { user, profile, isAuthenticated: isUserAuthenticated, isLoading: isUserLoading, signOut } = useAuth();
-  const { token, isLoading: isShopeeLoading, error: shopeeError, login: connectShopee, logout: disconnectShopee } = useShopeeAuth();
+  const { token, isLoading: isShopeeLoading, error: shopeeError, login: connectShopee, logout: disconnectShopee, shops } = useShopeeAuth();
+  
+  // Check if demo mode
+  const isDemo = useMemo(() => isDemoAccount(user?.email), [user?.email]);
+  
+  // Demo mode: use demo data if no real shop connected
+  const effectiveToken = useMemo(() => {
+    if (token?.shop_id) return token;
+    if (isDemo) return DEMO_TOKEN;
+    return null;
+  }, [token, isDemo]);
+  
+  const effectiveShops = useMemo(() => {
+    if (shops.length > 0) return shops;
+    if (isDemo) return [DEMO_SHOP];
+    return [];
+  }, [shops, isDemo]);
   
   const canManageShops = profile?.role === 'admin' || profile?.role === 'super_admin' || 
                          profile?.role_name === 'admin' || profile?.role_name === 'super_admin';
@@ -358,8 +556,9 @@ const Index = () => {
   
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showAddShopDialog, setShowAddShopDialog] = useState(false);
 
-  const isShopConnected = !!token?.shop_id;
+  const isShopConnected = !!effectiveToken?.shop_id;
   
   // Get active menu from URL path
   const activeMenu = allMenuItems.find(m => m.path === location.pathname)?.id || 'dashboard';
@@ -370,8 +569,11 @@ const Index = () => {
   };
 
   const renderContent = () => {
-    // Dashboard luôn hiển thị dù chưa kết nối shop
+    // Dashboard - hiển thị Demo Dashboard nếu là demo mode
     if (activeMenu === 'dashboard') {
+      if (isDemo && !token?.shop_id) {
+        return <DemoDashboard onNavigate={handleNavigate} />;
+      }
       return <DashboardPanel onNavigate={handleNavigate} />;
     }
     
@@ -388,6 +590,15 @@ const Index = () => {
     
     // Các trang khác cần kết nối shop
     if (!isShopConnected) {
+      // Demo mode: hiển thị demo data thay vì yêu cầu kết nối
+      if (isDemo) {
+        if (activeMenu === 'flash-sale') {
+          return <DemoFlashSalePanel />;
+        }
+        if (activeMenu === 'ads') {
+          return <DemoAdsPanel />;
+        }
+      }
       return <ConnectShopBanner onConnect={handleConnectShopee} error={shopeeError} isLoading={connectingShopee} canConnect={canManageShops} />;
     }
     
@@ -419,7 +630,11 @@ const Index = () => {
   }
 
   return (
-    <div className="h-screen bg-slate-50 flex overflow-hidden">
+    <div className="h-screen bg-slate-50 flex flex-col overflow-hidden">
+      {/* Demo Mode Banner */}
+      {isDemo && !token?.shop_id && <DemoModeBanner />}
+      
+      <div className="flex-1 flex overflow-hidden">
       {/* Sidebar - Fixed */}
       <aside className={cn(
         "bg-white border-r border-slate-200 flex flex-col transition-all duration-300 shadow-sm h-full",
@@ -429,9 +644,7 @@ const Index = () => {
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-100">
           {!sidebarCollapsed && (
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-red-500 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">β</span>
-              </div>
+              <img src="/logo_betacom.png" alt="BETACOM" className="w-8 h-8 rounded-lg object-contain" />
               <div>
                 <h1 className="font-semibold text-slate-800">BETACOM</h1>
                 <p className="text-[10px] text-slate-400">Shopee Management</p>
@@ -506,6 +719,21 @@ const Index = () => {
             {isShopConnected && (
               <ShopSelector />
             )}
+            
+            {/* Add Shop Button */}
+            {canManageShops && (
+              <button
+                onClick={() => setShowAddShopDialog(true)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium transition-colors"
+                title="Thêm shop mới"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+                <span className="hidden sm:inline">Thêm shop</span>
+              </button>
+            )}
+            
             {/* User menu */}
             <div className="relative">
               <button
@@ -535,20 +763,6 @@ const Index = () => {
                       </svg>
                       Thông tin tài khoản
                     </button>
-                    {isShopConnected && (
-                      <>
-                        <hr className="my-1 border-slate-100" />
-                        <button
-                          onClick={() => { disconnectShopee(); setShowUserMenu(false); }}
-                          className="w-full px-4 py-2.5 text-left text-sm text-slate-600 hover:bg-slate-50 flex items-center gap-2"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                          </svg>
-                          Đổi shop khác
-                        </button>
-                      </>
-                    )}
                     <hr className="my-1 border-slate-100" />
                     <button
                       onClick={() => { disconnectShopee(); signOut(); setShowUserMenu(false); }}
@@ -571,8 +785,238 @@ const Index = () => {
           {renderContent()}
         </div>
       </main>
+      </div>
+      
+      {/* Add Shop Dialog */}
+      <ShopConnectionDialog
+        open={showAddShopDialog}
+        onOpenChange={setShowAddShopDialog}
+        onSuccess={() => {
+          setShowAddShopDialog(false);
+          window.location.reload();
+        }}
+      />
     </div>
   );
 };
+
+// Demo Flash Sale Panel - Hiển thị demo data cho reviewer
+function DemoFlashSalePanel() {
+  const { DEMO_FLASH_SALES, DEMO_SCHEDULED_TASKS } = require('@/lib/demoData');
+  
+  const formatTime = (timestamp: number) => {
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
+  };
+  const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Tabs */}
+      <div className="bg-white border-b border-slate-200 px-4">
+        <div className="flex gap-1">
+          <button className="flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 border-orange-500 text-orange-600">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            Flash Sale
+          </button>
+          <button className="flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 border-transparent text-slate-500">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Lịch hẹn giờ
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-auto p-4">
+        <div className="space-y-4">
+          {DEMO_FLASH_SALES.map((sale: any) => (
+            <div key={sale.flash_sale_id} className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                    sale.status === 'ongoing' ? 'bg-green-100 text-green-700' :
+                    sale.status === 'upcoming' ? 'bg-blue-100 text-blue-700' :
+                    'bg-gray-100 text-gray-600'
+                  }`}>
+                    {sale.status === 'ongoing' ? '🔥 Đang diễn ra' :
+                     sale.status === 'upcoming' ? '⏰ Sắp diễn ra' : '✓ Đã kết thúc'}
+                  </span>
+                  <span className="text-sm text-slate-500">
+                    {formatTime(sale.start_time)} - {formatTime(sale.end_time)}
+                  </span>
+                </div>
+                <span className="text-sm font-medium text-slate-700">
+                  {sale.items.length} sản phẩm
+                </span>
+              </div>
+              
+              <div className="space-y-2">
+                {sale.items.map((item: any) => (
+                  <div key={item.item_id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                    <div>
+                      <p className="font-medium text-slate-700">{item.name}</p>
+                      <p className="text-xs text-slate-500">ID: {item.item_id}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm">
+                        <span className="line-through text-slate-400">{formatPrice(item.original_price)}</span>
+                        <span className="ml-2 font-medium text-red-600">{formatPrice(item.flash_sale_price)}</span>
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Đã bán: {item.sold}/{item.stock}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Demo Ads Panel - Hiển thị demo data cho reviewer
+function DemoAdsPanel() {
+  const { DEMO_CAMPAIGNS, DEMO_BUDGET_SCHEDULES } = require('@/lib/demoData');
+  
+  const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price) + 'đ';
+  const formatDate = (timestamp: number) => {
+    if (!timestamp) return 'Không giới hạn';
+    return new Date(timestamp * 1000).toLocaleDateString('vi-VN');
+  };
+
+  return (
+    <div className="flex flex-col bg-slate-50 min-h-full">
+      {/* Budget Scheduler Section */}
+      <div className="border-b border-slate-200 bg-white p-4">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-xl flex items-center justify-center">
+            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="font-semibold text-slate-800">Lịch ngân sách tự động</h3>
+            <p className="text-sm text-slate-500">{DEMO_BUDGET_SCHEDULES.length} lịch đang chờ</p>
+          </div>
+        </div>
+        
+        <div className="space-y-2">
+          {DEMO_BUDGET_SCHEDULES.map((schedule: any) => (
+            <div key={schedule.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+              <div>
+                <p className="font-medium text-slate-700">{schedule.campaign_name}</p>
+                <p className="text-xs text-slate-500">
+                  {new Date(schedule.scheduled_time).toLocaleString('vi-VN')}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="font-medium text-emerald-600">{formatPrice(schedule.budget)}</p>
+                <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full">
+                  Đang chờ
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Header */}
+      <div className="bg-white border-b border-slate-200 p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-xl flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-800">Quản lý Quảng cáo</h2>
+              <p className="text-sm text-slate-400">{DEMO_CAMPAIGNS.length} chiến dịch</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 bg-white overflow-auto">
+        <table className="w-full">
+          <thead className="sticky top-0 bg-slate-50">
+            <tr>
+              <th className="text-left px-4 py-3 text-xs font-medium text-slate-500">Chiến dịch</th>
+              <th className="text-center px-4 py-3 text-xs font-medium text-slate-500">Loại</th>
+              <th className="text-center px-4 py-3 text-xs font-medium text-slate-500">Ngân sách</th>
+              <th className="text-center px-4 py-3 text-xs font-medium text-slate-500">Thời gian</th>
+              <th className="text-center px-4 py-3 text-xs font-medium text-slate-500">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {DEMO_CAMPAIGNS.map((campaign: any) => (
+              <tr key={campaign.campaign_id} className="border-t border-slate-100 hover:bg-slate-50">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      campaign.status === 'ongoing' ? 'bg-green-100 text-green-700' :
+                      campaign.status === 'paused' ? 'bg-yellow-100 text-yellow-700' :
+                      'bg-gray-100 text-gray-600'
+                    }`}>
+                      {campaign.status === 'ongoing' ? 'Đang chạy' :
+                       campaign.status === 'paused' ? 'Tạm dừng' : 'Kết thúc'}
+                    </span>
+                  </div>
+                  <p className="font-medium text-slate-800">{campaign.name}</p>
+                  <p className="text-xs text-slate-400">ID: {campaign.campaign_id}</p>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    campaign.ad_type === 'auto' ? 'bg-purple-100 text-purple-700' : 'bg-indigo-100 text-indigo-700'
+                  }`}>
+                    {campaign.ad_type === 'auto' ? 'Tự động' : 'Thủ công'}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-center font-medium text-slate-700">
+                  {formatPrice(campaign.common_info?.campaign_budget || 0)}
+                </td>
+                <td className="px-4 py-3 text-center text-xs">
+                  <div className="text-slate-600">{formatDate(campaign.common_info?.campaign_duration?.start_time)}</div>
+                  <div className="text-slate-400">→ {formatDate(campaign.common_info?.campaign_duration?.end_time)}</div>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <button className="p-1.5 hover:bg-slate-100 rounded-md" title="Chỉnh sửa">
+                      <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button className={`p-1.5 rounded-md ${
+                      campaign.status === 'ongoing' ? 'hover:bg-yellow-100 text-yellow-600' : 'hover:bg-green-100 text-green-600'
+                    }`} title={campaign.status === 'ongoing' ? 'Tạm dừng' : 'Tiếp tục'}>
+                      {campaign.status === 'ongoing' ? (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export default Index;

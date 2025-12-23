@@ -89,12 +89,30 @@ serve(async (req) => {
         // Wait a bit for trigger to create profile
         await new Promise(resolve => setTimeout(resolve, 1000));
         
+        // Map role to role name in roles table
+        const roleNameMap: Record<string, string> = {
+          'user': 'member',
+          'admin': 'admin',
+          'super_admin': 'super_admin',
+        };
+        const targetRoleName = roleNameMap[role] || 'member';
+        
+        // Get role_id from roles table
+        const { data: targetRole } = await supabaseAdmin
+          .from('roles')
+          .select('id')
+          .eq('name', targetRoleName)
+          .single();
+        
+        console.log('Creating user with role:', role, 'role_name:', targetRoleName, 'role_id:', targetRole?.id);
+        
         // Try to update first
         const { error: updateError } = await supabaseAdmin
           .from('profiles')
           .update({ 
             full_name: full_name || null,
             role: role || 'user',
+            role_id: targetRole?.id,
             email: email,
           })
           .eq('id', newUser.user.id);
@@ -102,13 +120,6 @@ serve(async (req) => {
         // If update fails (profile doesn't exist), insert it
         if (updateError) {
           console.log('Profile update failed, trying insert:', updateError);
-          
-          // Get default role_id for member
-          const { data: memberRole } = await supabaseAdmin
-            .from('roles')
-            .select('id')
-            .eq('name', 'member')
-            .single();
 
           await supabaseAdmin
             .from('profiles')
@@ -117,7 +128,7 @@ serve(async (req) => {
               email: email,
               full_name: full_name || null,
               role: role || 'user',
-              role_id: memberRole?.id,
+              role_id: targetRole?.id,
             });
         }
       }

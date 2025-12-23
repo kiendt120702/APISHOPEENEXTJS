@@ -1,11 +1,43 @@
 /**
  * Auth Page - Trang đăng nhập/đăng ký tài khoản
+ * Tích hợp Shopee Open Platform API
  */
 
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 
 type AuthMode = 'login' | 'register';
+
+// Feature list for e-commerce showcase
+const FEATURES = [
+  {
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+    ),
+    title: 'Flash Sale Manager',
+    description: 'Quản lý và hẹn giờ đăng ký Flash Sale tự động',
+  },
+  {
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+      </svg>
+    ),
+    title: 'Ads Budget Scheduler',
+    description: 'Lên lịch thay đổi ngân sách quảng cáo',
+  },
+  {
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+    title: 'Analytics Dashboard',
+    description: 'Theo dõi hiệu suất bán hàng real-time',
+  },
+];
 
 export default function AuthPage() {
   const { isLoading, error, signIn, signUp, clearError } = useAuth();
@@ -61,24 +93,74 @@ export default function AuthPage() {
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-red-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-red-50 flex">
       {/* Background decoration */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-orange-200 rounded-full opacity-20 blur-3xl" />
         <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-red-200 rounded-full opacity-20 blur-3xl" />
       </div>
 
-      <div className="relative w-full max-w-md">
-        {/* Logo & Title */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-orange-500 to-red-500 rounded-2xl shadow-xl shadow-orange-500/30 mb-4">
-            <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+      {/* Left Side - Features Showcase (Hidden on mobile) */}
+      <div className="hidden lg:flex lg:w-1/2 relative items-center justify-center p-12">
+        <div className="max-w-lg">
+          {/* Logo & Branding */}
+          <div className="flex items-center gap-3 mb-8">
+            <img src="/logo_betacom.png" alt="BETACOM" className="w-12 h-12 rounded-xl object-contain" />
+            <div>
+              <h1 className="text-2xl font-bold text-slate-800">BETACOM</h1>
+              <p className="text-sm text-slate-500">Shopee Management Platform</p>
+            </div>
           </div>
-          <h1 className="text-3xl font-bold text-slate-800">Shopee Tools</h1>
-          <p className="text-slate-500 mt-2">Flash Sale Manager</p>
+
+          {/* Main Headline */}
+          <h2 className="text-4xl font-bold text-slate-800 mb-4">
+            Quản lý Shop
+            <span className="text-orange-500"> hiệu quả hơn</span>
+          </h2>
+          <p className="text-lg text-slate-600 mb-8">
+            Công cụ tự động hóa Flash Sale, quảng cáo và theo dõi hiệu suất bán hàng 
+            tích hợp trực tiếp với Shopee Open Platform API.
+          </p>
+
+          {/* Features List */}
+          <div className="space-y-4">
+            {FEATURES.map((feature, index) => (
+              <div key={index} className="flex items-start gap-4 p-4 bg-white/60 rounded-xl border border-slate-100">
+                <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center text-orange-600 flex-shrink-0">
+                  {feature.icon}
+                </div>
+                <div>
+                  <h3 className="font-semibold text-slate-800">{feature.title}</h3>
+                  <p className="text-sm text-slate-600">{feature.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* API Integration Badge */}
+          <div className="mt-8 flex items-center gap-3 p-4 bg-gradient-to-r from-orange-100 to-red-100 rounded-xl">
+            <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+            </div>
+            <div>
+              <p className="font-medium text-slate-800">Shopee Open Platform</p>
+              <p className="text-sm text-slate-600">Tích hợp API chính thức từ Shopee</p>
+            </div>
+          </div>
         </div>
+      </div>
+
+      {/* Right Side - Auth Form */}
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="relative w-full max-w-md">
+          {/* Mobile Logo (shown only on mobile) */}
+          <div className="text-center mb-8 lg:hidden">
+            <img src="/logo_betacom.png" alt="BETACOM" className="w-20 h-20 rounded-2xl shadow-xl shadow-orange-500/30 mb-4 object-contain" />
+            <h1 className="text-3xl font-bold text-slate-800">BETACOM</h1>
+            <p className="text-slate-500 mt-2">Shopee Management Platform</p>
+          </div>
 
         {/* Auth Card */}
         <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 p-8 border border-slate-100">
@@ -207,11 +289,12 @@ export default function AuthPage() {
           </form>
         </div>
 
-        {/* Footer */}
-        <div className="text-center mt-6">
-          <p className="text-xs text-slate-400">
-            Powered by <span className="font-medium">Supabase Auth</span>
-          </p>
+          {/* Footer */}
+          <div className="text-center mt-6">
+            <p className="text-xs text-slate-400">
+              Powered by <span className="font-medium">Shopee Open Platform API</span>
+            </p>
+          </div>
         </div>
       </div>
     </div>
