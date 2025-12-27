@@ -73,17 +73,17 @@ interface TimeSlot {
   end_time: number;
 }
 
-const STATUS_MAP: Record<number, { label: string; color: string }> = {
-  0: { label: 'Đã xóa', color: 'bg-gray-100 text-gray-600' },
-  1: { label: 'Bật', color: 'bg-green-100 text-green-700' },
-  2: { label: 'Tắt', color: 'bg-yellow-100 text-yellow-700' },
-  3: { label: 'Từ chối', color: 'bg-red-100 text-red-700' },
+const STATUS_MAP: Record<number, { label: string; color: string; icon: string }> = {
+  0: { label: 'Đã xóa', color: 'bg-gray-100 text-gray-600 border-gray-200', icon: '🗑️' },
+  1: { label: 'Bật', color: 'bg-green-100 text-green-700 border-green-200', icon: '✓' },
+  2: { label: 'Tắt', color: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: '⏸' },
+  3: { label: 'Từ chối', color: 'bg-red-100 text-red-700 border-red-200', icon: '✗' },
 };
 
-const TYPE_MAP: Record<number, { label: string; color: string }> = {
-  1: { label: 'Sắp tới', color: 'bg-blue-100 text-blue-700' },
-  2: { label: 'Đang chạy', color: 'bg-orange-100 text-orange-700' },
-  3: { label: 'Kết thúc', color: 'bg-gray-100 text-gray-600' },
+const TYPE_MAP: Record<number, { label: string; color: string; icon: string }> = {
+  1: { label: 'Sắp tới', color: 'bg-blue-100 text-blue-700 border-blue-200', icon: '⏳' },
+  2: { label: 'Đang chạy', color: 'bg-orange-100 text-orange-700 border-orange-200', icon: '🔥' },
+  3: { label: 'Kết thúc', color: 'bg-gray-100 text-gray-600 border-gray-200', icon: '✓' },
 };
 
 const TYPE_PRIORITY: Record<number, number> = { 2: 1, 1: 2, 3: 3 };
@@ -583,7 +583,8 @@ const FlashSalePanel = forwardRef<FlashSalePanelRef>((_, ref) => {
                       <div className="text-sm text-gray-500">Số sản phẩm tham gia {sale.item_count}</div>
                     </TableCell>
                     <TableCell className="py-4">
-                      <span className={`text-sm ${typeInfo?.color || 'text-gray-500'}`}>
+                      <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-medium ${typeInfo?.color || 'bg-gray-100 text-gray-500'}`}>
+                        <span>{typeInfo?.icon}</span>
                         {typeInfo?.label || 'Không xác định'}
                       </span>
                     </TableCell>

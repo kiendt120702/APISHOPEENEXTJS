@@ -41,17 +41,17 @@ interface FlashSale {
   synced_at: string;
 }
 
-const STATUS_MAP: Record<number, { label: string; color: string }> = {
-  0: { label: 'Đã xóa', color: 'bg-gray-100 text-gray-600' },
-  1: { label: 'Bật', color: 'bg-green-100 text-green-700' },
-  2: { label: 'Tắt', color: 'bg-yellow-100 text-yellow-700' },
-  3: { label: 'Từ chối', color: 'bg-red-100 text-red-700' },
+const STATUS_MAP: Record<number, { label: string; color: string; icon: string }> = {
+  0: { label: 'Đã xóa', color: 'bg-gray-100 text-gray-600 border-gray-200', icon: '🗑️' },
+  1: { label: 'Bật', color: 'bg-green-100 text-green-700 border-green-200', icon: '✓' },
+  2: { label: 'Tắt', color: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: '⏸' },
+  3: { label: 'Từ chối', color: 'bg-red-100 text-red-700 border-red-200', icon: '✗' },
 };
 
-const TYPE_MAP: Record<number, { label: string; color: string }> = {
-  1: { label: 'Sắp tới', color: 'bg-blue-100 text-blue-700' },
-  2: { label: 'Đang chạy', color: 'bg-orange-100 text-orange-700' },
-  3: { label: 'Kết thúc', color: 'bg-gray-100 text-gray-600' },
+const TYPE_MAP: Record<number, { label: string; color: string; icon: string }> = {
+  1: { label: 'Sắp tới', color: 'bg-blue-100 text-blue-700 border-blue-200', icon: '⏳' },
+  2: { label: 'Đang chạy', color: 'bg-orange-100 text-orange-700 border-orange-200', icon: '🔥' },
+  3: { label: 'Kết thúc', color: 'bg-gray-100 text-gray-600 border-gray-200', icon: '✓' },
 };
 
 const TYPE_PRIORITY: Record<number, number> = { 2: 1, 1: 2, 3: 3 };
@@ -251,7 +251,6 @@ export default function FlashSalePanelV2() {
                   {paginatedSales.map((sale) => {
                     const isSelected = selectedSale?.flash_sale_id === sale.flash_sale_id;
                     const typeInfo = TYPE_MAP[sale.type];
-                    const statusInfo = STATUS_MAP[sale.status];
                     
                     return (
                       <TableRow 
@@ -261,20 +260,13 @@ export default function FlashSalePanelV2() {
                       >
                         <TableCell>
                           <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${typeInfo?.color}`}>
-                                {typeInfo?.label}
-                              </span>
-                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${statusInfo?.color}`}>
-                                {statusInfo?.label}
-                              </span>
-                            </div>
                             <p className="font-medium text-slate-800">{formatDate(sale.start_time)}</p>
                             <p className="text-xs text-slate-400">→ {formatDate(sale.end_time)}</p>
                           </div>
                         </TableCell>
                         <TableCell className="text-center">
-                          <span className={`text-xs px-2 py-1 rounded-full ${typeInfo?.color}`}>
+                          <span className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border font-medium ${typeInfo?.color}`}>
+                            <span>{typeInfo?.icon}</span>
                             {typeInfo?.label}
                           </span>
                         </TableCell>

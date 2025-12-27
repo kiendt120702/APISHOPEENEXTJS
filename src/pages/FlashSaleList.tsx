@@ -90,17 +90,17 @@ interface TimeSlotsResponse {
   };
 }
 
-const STATUS_MAP: Record<number, { label: string; color: string }> = {
-  0: { label: 'Đã xóa', color: 'bg-gray-100 text-gray-600' },
-  1: { label: 'Bật', color: 'bg-green-100 text-green-700' },
-  2: { label: 'Tắt', color: 'bg-yellow-100 text-yellow-700' },
-  3: { label: 'Từ chối', color: 'bg-red-100 text-red-700' },
+const STATUS_MAP: Record<number, { label: string; color: string; icon: string }> = {
+  0: { label: 'Đã xóa', color: 'bg-gray-100 text-gray-600 border-gray-200', icon: '🗑️' },
+  1: { label: 'Bật', color: 'bg-green-100 text-green-700 border-green-200', icon: '✓' },
+  2: { label: 'Tắt', color: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: '⏸' },
+  3: { label: 'Từ chối', color: 'bg-red-100 text-red-700 border-red-200', icon: '✗' },
 };
 
-const TYPE_MAP: Record<number, { label: string; color: string }> = {
-  1: { label: 'Sắp tới', color: 'bg-blue-100 text-blue-700' },
-  2: { label: 'Đang chạy', color: 'bg-orange-100 text-orange-700' },
-  3: { label: 'Kết thúc', color: 'bg-gray-100 text-gray-600' },
+const TYPE_MAP: Record<number, { label: string; color: string; icon: string }> = {
+  1: { label: 'Sắp tới', color: 'bg-blue-100 text-blue-700 border-blue-200', icon: '⏳' },
+  2: { label: 'Đang chạy', color: 'bg-orange-100 text-orange-700 border-orange-200', icon: '🔥' },
+  3: { label: 'Kết thúc', color: 'bg-gray-100 text-gray-600 border-gray-200', icon: '✓' },
 };
 
 const FlashSaleList = () => {
@@ -423,12 +423,12 @@ const FlashSaleList = () => {
           <Table>
             <TableHeader>
               <TableRow className="bg-gray-50">
-                <TableHead className="w-[180px]">Thời gian</TableHead>
-                <TableHead className="w-[100px]">Trạng thái</TableHead>
+                <TableHead className="w-[280px]">Khung giờ</TableHead>
+                <TableHead className="w-[120px]">Trạng thái</TableHead>
                 <TableHead className="w-[80px] text-center">Sản phẩm</TableHead>
                 <TableHead className="w-[70px] text-center">Clicks</TableHead>
                 <TableHead className="w-[70px] text-center">Nhắc nhở</TableHead>
-                <TableHead className="w-[200px] text-center">Hành động</TableHead>
+                <TableHead className="w-[180px] text-center">Thao tác</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -443,25 +443,22 @@ const FlashSaleList = () => {
                   <>
                     <TableRow key={sale.flash_sale_id} className="hover:bg-gray-50">
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <div className="flex flex-col gap-1">
-                            <span className={`text-xs px-2 py-0.5 rounded-full w-fit ${TYPE_MAP[sale.type]?.color}`}>
-                              {TYPE_MAP[sale.type]?.label}
-                            </span>
-                            <span className={`text-xs px-2 py-0.5 rounded-full w-fit ${STATUS_MAP[sale.status]?.color}`}>
-                              {STATUS_MAP[sale.status]?.label}
-                            </span>
+                        <div className="flex flex-col">
+                          <div className="font-medium text-sm">
+                            {formatDate(sale.start_time)} - {formatDate(sale.end_time)}
                           </div>
-                          <div>
-                            <div className="font-medium text-sm">{formatDate(sale.start_time)}</div>
-                            <div className="text-xs text-gray-500">→ {formatDate(sale.end_time)}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            ID: {sale.flash_sale_id}
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className={`text-xs px-2 py-1 rounded-full ${TYPE_MAP[sale.type]?.color}`}>
-                          {TYPE_MAP[sale.type]?.label}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border font-medium w-fit ${TYPE_MAP[sale.type]?.color}`}>
+                            <span>{TYPE_MAP[sale.type]?.icon}</span>
+                            {TYPE_MAP[sale.type]?.label}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell className="text-center">
                         <span className="font-medium">{sale.enabled_item_count}</span>

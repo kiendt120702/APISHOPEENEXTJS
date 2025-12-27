@@ -568,9 +568,26 @@ const Index = () => {
   const { token, isLoading: isShopeeLoading, error: shopeeError, login: connectShopee, logout: disconnectShopee, shops } = useShopeeAuth();
   
   const canManageShops = profile?.role_name === 'admin' || profile?.role_name === 'super_admin';
+  const canManageUsers = profile?.role_name === 'admin' || profile?.role_name === 'super_admin';
   
-  // All menu items (Partner Accounts integrated into Profile)
-  const allMenuItems = menuItems;
+  // Filter menu items based on role
+  const allMenuItems = useMemo(() => {
+    return menuItems.map(item => {
+      if (item.id === 'profile' && item.children) {
+        return {
+          ...item,
+          children: item.children.filter(child => {
+            // Hide "Quản lý User" for members
+            if (child.id === 'profile-users' && !canManageUsers) {
+              return false;
+            }
+            return true;
+          })
+        };
+      }
+      return item;
+    });
+  }, [canManageUsers]);
   const [connectingShopee, setConnectingShopee] = useState(false);
 
   const handleConnectShopee = async () => {
@@ -694,10 +711,15 @@ const Index = () => {
         {/* Logo */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-100">
           {!sidebarCollapsed && (
-            <div className="flex items-center gap-2">
+            <a href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer">
               <img src="/logo_betacom.png" alt="BETACOM" className="w-8 h-8 rounded-lg object-contain" />
               <h1 className="font-bold text-xl text-red-500">BETACOM</h1>
-            </div>
+            </a>
+          )}
+          {sidebarCollapsed && (
+            <a href="/" className="hover:opacity-80 transition-opacity cursor-pointer">
+              <img src="/logo_betacom.png" alt="BETACOM" className="w-8 h-8 rounded-lg object-contain" />
+            </a>
           )}
           <button 
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -825,20 +847,6 @@ const Index = () => {
             {/* Shop Selector */}
             {isShopConnected && (
               <ShopSelector />
-            )}
-            
-            {/* Add Shop Button */}
-            {canManageShops && (
-              <button
-                onClick={() => setShowAddShopDialog(true)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium transition-colors"
-                title="Thêm shop mới"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
-                <span className="hidden sm:inline">Thêm shop</span>
-              </button>
             )}
             
             {/* User menu */}

@@ -82,22 +82,24 @@ export default function ScheduledPanel() {
     });
   };
 
-  const fetchSchedules = async () => {
+  const fetchSchedules = async (showLoading = true) => {
     if (!token?.shop_id) return;
 
-    setLoading(true);
+    if (showLoading) setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke('shopee-scheduler', {
-        body: { action: 'list', shop_id: token.shop_id },
-      });
+      // Load trực tiếp từ database thay vì gọi edge function
+      const { data, error } = await supabase
+        .from('scheduled_flash_sales')
+        .select('*')
+        .eq('shop_id', token.shop_id)
+        .order('scheduled_at', { ascending: true });
 
       if (error) throw error;
-      setSchedules(data?.schedules || []);
-      toast({ title: 'Thành công', description: `Tìm thấy ${data?.schedules?.length || 0} lịch hẹn` });
+      setSchedules(data || []);
     } catch (err) {
       toast({ title: 'Lỗi', description: (err as Error).message, variant: 'destructive' });
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
@@ -213,10 +215,10 @@ export default function ScheduledPanel() {
     }
   }, [isAuthenticated, token?.shop_id]);
 
-  // Auto refresh
+  // Auto refresh (silent - không hiện loading)
   useEffect(() => {
     const interval = setInterval(() => {
-      if (isAuthenticated) fetchSchedules();
+      if (isAuthenticated) fetchSchedules(false);
     }, 30000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);

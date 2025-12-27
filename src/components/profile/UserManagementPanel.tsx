@@ -102,10 +102,10 @@ export function UserManagementPanel() {
 
       if (error) throw error;
       
-      // Map role từ roles table nếu có, fallback về role field
+      // Map role từ roles table nếu có
       const usersWithRole = (data || []).map(user => ({
         ...user,
-        role: (user.roles as any)?.name || user.role || 'user',
+        role: (user.roles as any)?.name || 'user',
       }));
       
       setUsers(usersWithRole);
@@ -375,10 +375,23 @@ export function UserManagementPanel() {
   };
 
   const handleAddUser = async () => {
-    if (!newEmail.trim() || !newPassword.trim()) {
+    const emailTrimmed = newEmail.trim();
+    
+    if (!emailTrimmed || !newPassword.trim()) {
       toast({
         title: 'Lỗi',
         description: 'Vui lòng nhập email và mật khẩu',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailTrimmed)) {
+      toast({
+        title: 'Lỗi',
+        description: 'Email không đúng định dạng. Vui lòng nhập email hợp lệ (ví dụ: user@example.com)',
         variant: 'destructive',
       });
       return;
@@ -399,7 +412,7 @@ export function UserManagementPanel() {
       const { data, error } = await supabase.functions.invoke('admin-users', {
         body: {
           action: 'create',
-          email: newEmail.trim(),
+          email: emailTrimmed,
           password: newPassword,
           full_name: newFullName.trim() || null,
           role: newRole,

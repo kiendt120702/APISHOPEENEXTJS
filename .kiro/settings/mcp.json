@@ -14,7 +14,9 @@
         "execute_sql",
         "get_advisors",
         "get_edge_function",
-        "deploy_edge_function"
+        "deploy_edge_function",
+        "list_edge_functions",
+        "list_migrations"
       ]
     }
   }

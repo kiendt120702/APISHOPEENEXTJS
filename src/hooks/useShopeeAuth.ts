@@ -151,21 +151,23 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
   // Load token on mount và khi auth state thay đổi
   useEffect(() => {
     let mounted = true;
+    let initialLoadDone = false;
 
     async function initLoad() {
       try {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
+        const { data: { session } } = await supabase.auth.getSession();
         if (mounted) {
-          if (authUser) {
-            setUser({ id: authUser.id, email: authUser.email });
+          if (session?.user) {
+            setUser({ id: session.user.id, email: session.user.email });
+            await loadTokenFromSource(session.user.id);
           }
-          await loadTokenFromSource(authUser?.id);
         }
       } catch (err) {
         console.error('[AUTH] Error in initLoad:', err);
       } finally {
         if (mounted) {
           setIsLoading(false);
+          initialLoadDone = true;
         }
       }
     }
@@ -175,18 +177,31 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
     // Lắng nghe auth state change để reload token khi đăng nhập
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (!mounted) return;
+        
+        // Bỏ qua INITIAL_SESSION vì đã xử lý ở getSession
+        if (event === 'INITIAL_SESSION') return;
+        
+        // Bỏ qua TOKEN_REFRESHED - không cần reload UI
+        if (event === 'TOKEN_REFRESHED') return;
+        
+        // Chỉ xử lý khi initial load đã xong
+        if (!initialLoadDone) return;
+
         console.log('[AUTH] Auth state changed:', event);
-        if (event === 'SIGNED_IN' && session?.user && mounted) {
-          setUser({ id: session.user.id, email: session.user.email });
-          // Đợi 1 chút để đảm bảo session đã sẵn sàng
-          setTimeout(async () => {
-            if (mounted) {
-              await loadTokenFromSource(session.user.id);
-            }
-          }, 100);
-        } else if (event === 'SIGNED_OUT' && mounted) {
+        
+        if (event === 'SIGNED_IN' && session?.user) {
+          // Chỉ reload nếu user khác hoặc chưa có token
+          const currentUserId = user?.id;
+          if (currentUserId !== session.user.id || !token) {
+            setUser({ id: session.user.id, email: session.user.email });
+            await loadTokenFromSource(session.user.id);
+          }
+        } else if (event === 'SIGNED_OUT') {
           setToken(null);
           setUser(null);
+          setShops([]);
+          setSelectedShopId(null);
         }
       }
     );
@@ -266,7 +281,7 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
             // Sync shop info từ Shopee API để lấy shop_name
             try {
               const { data: shopInfoData } = await supabase.functions.invoke('shopee-shop', {
-                body: { action: 'sync-info', shop_id: newToken.shop_id },
+                body: { action: 'get-full-info', shop_id: newToken.shop_id, force_refresh: true },
               });
               console.log('[AUTH] Shop info synced:', shopInfoData);
             } catch (syncErr) {

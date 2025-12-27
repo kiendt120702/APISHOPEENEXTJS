@@ -99,10 +99,17 @@ async function getTokenWithAutoRefresh(supabase: any, shopId: number, userId?: s
   console.log(`[SYNC] shops table query result:`, { 
     found: !!shopData, 
     error: shopError?.message,
-    hasAccessToken: !!shopData?.access_token 
+    hasAccessToken: !!shopData?.access_token,
+    accessTokenLength: shopData?.access_token?.length,
+    accessTokenPrefix: shopData?.access_token?.substring(0, 20),
   });
 
   if (!shopError && shopData?.access_token) {
+    console.log(`[SYNC] Using token from shops table:`, {
+      shopId: shopData.shop_id,
+      tokenLength: shopData.access_token.length,
+      tokenPrefix: shopData.access_token.substring(0, 20),
+    });
     return {
       access_token: shopData.access_token,
       refresh_token: shopData.refresh_token,
@@ -252,6 +259,16 @@ async function callShopeeAPIWithParams(
   const makeRequest = async (accessToken: string) => {
     const timestamp = Math.floor(Date.now() / 1000);
     const sign = await createSignature(credentials.partnerKey, credentials.partnerId, path, timestamp, accessToken, shopId);
+
+    // Log chi tiết access token đang sử dụng
+    console.log('[SYNC] Making API request with:', {
+      path,
+      shopId,
+      partnerId: credentials.partnerId,
+      accessTokenLength: accessToken?.length,
+      accessTokenPrefix: accessToken?.substring(0, 20),
+      timestamp,
+    });
 
     const params = new URLSearchParams({
       partner_id: credentials.partnerId.toString(),

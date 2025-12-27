@@ -12,7 +12,6 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { createHmac } from 'https://deno.land/std@0.168.0/node/crypto.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -75,19 +74,39 @@ async function fetchWithProxy(targetUrl: string, options: RequestInit): Promise<
   return await fetch(targetUrl, options);
 }
 
-function createSignature(partnerKey: string, partnerId: number, path: string, timestamp: number, accessToken = '', shopId = 0): string {
+async function createSignature(
+  partnerKey: string,
+  partnerId: number,
+  path: string,
+  timestamp: number,
+  accessToken = '',
+  shopId = 0
+): Promise<string> {
   let baseString = `${partnerId}${path}${timestamp}`;
   if (accessToken) baseString += accessToken;
   if (shopId) baseString += shopId;
-  const hmac = createHmac('sha256', partnerKey);
-  hmac.update(baseString);
-  return hmac.digest('hex');
+
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(partnerKey);
+  const messageData = encoder.encode(baseString);
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, messageData);
+  const hashArray = Array.from(new Uint8Array(signature));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 async function refreshAccessToken(credentials: PartnerCredentials, refreshToken: string, shopId: number) {
   const timestamp = Math.floor(Date.now() / 1000);
   const path = '/api/v2/auth/access_token/get';
-  const sign = createSignature(credentials.partnerKey, credentials.partnerId, path, timestamp);
+  const sign = await createSignature(credentials.partnerKey, credentials.partnerId, path, timestamp);
   const url = `${SHOPEE_BASE_URL}${path}?partner_id=${credentials.partnerId}&timestamp=${timestamp}&sign=${sign}`;
   const response = await fetchWithProxy(url, {
     method: 'POST',
@@ -138,7 +157,7 @@ async function callShopeeAPIWithRetry(
 ) {
   const makeRequest = async (accessToken: string) => {
     const timestamp = Math.floor(Date.now() / 1000);
-    const sign = createSignature(credentials.partnerKey, credentials.partnerId, path, timestamp, accessToken, shopId);
+    const sign = await createSignature(credentials.partnerKey, credentials.partnerId, path, timestamp, accessToken, shopId);
     const params = new URLSearchParams({
       partner_id: credentials.partnerId.toString(),
       timestamp: timestamp.toString(),
@@ -170,6 +189,44 @@ async function callShopeeAPIWithRetry(
 }
 
 
+// Tìm flash sale hiện có trong timeslot
+async function findExistingFlashSale(
+  supabase: ReturnType<typeof createClient>,
+  credentials: PartnerCredentials,
+  shopId: number,
+  token: { access_token: string; refresh_token: string },
+  timeslotId: number
+): Promise<number | null> {
+  // Gọi API lấy danh sách flash sale của shop
+  const listRes = await callShopeeAPIWithRetry(
+    supabase,
+    credentials,
+    '/api/v2/shop_flash_sale/get_shop_flash_sale_list',
+    'GET',
+    shopId,
+    token,
+    undefined,
+    { type: 0, offset: 0, limit: 100 } // type 0 = upcoming
+  );
+
+  if (listRes.error && listRes.error !== '' && listRes.error !== '-') {
+    console.log('[SCHEDULER] Failed to get flash sale list:', listRes.message);
+    return null;
+  }
+
+  const flashSaleList = listRes.response?.flash_sale_list || [];
+  
+  // Tìm flash sale có cùng timeslot_id
+  const existing = flashSaleList.find((fs: { timeslot_id: number }) => fs.timeslot_id === timeslotId);
+  
+  if (existing) {
+    console.log('[SCHEDULER] Found existing flash sale:', existing.flash_sale_id, 'for timeslot:', timeslotId);
+    return existing.flash_sale_id;
+  }
+
+  return null;
+}
+
 // Thực hiện copy Flash Sale
 async function executeCopyFlashSale(
   supabase: ReturnType<typeof createClient>,
@@ -179,6 +236,9 @@ async function executeCopyFlashSale(
 ) {
   const credentials = await getPartnerCredentials(supabase, shopId);
   const token = await getTokenWithAutoRefresh(supabase, shopId);
+
+  let flashSaleId: number | null = null;
+  let isExisting = false;
 
   // Bước 1: Tạo Flash Sale mới
   const createRes = await callShopeeAPIWithRetry(
@@ -191,11 +251,26 @@ async function executeCopyFlashSale(
     { timeslot_id: timeslotId }
   );
 
-  if (createRes.error) {
-    return { success: false, message: `Tạo Flash Sale lỗi: ${createRes.message}` };
+  // Kiểm tra lỗi "already exist"
+  if (createRes.error && createRes.message?.includes('already exist')) {
+    console.log('[SCHEDULER] Flash sale already exists for timeslot:', timeslotId);
+    
+    // Tìm flash sale hiện có
+    flashSaleId = await findExistingFlashSale(supabase, credentials, shopId, token, timeslotId);
+    
+    if (!flashSaleId) {
+      return { 
+        success: false, 
+        message: `Timeslot đã có Flash Sale nhưng không tìm được ID để thêm SP` 
+      };
+    }
+    isExisting = true;
+  } else if (createRes.error && createRes.error !== '' && createRes.error !== '-') {
+    return { success: false, message: `Tạo Flash Sale lỗi: ${createRes.message || createRes.error}` };
+  } else {
+    flashSaleId = createRes.response?.flash_sale_id;
   }
 
-  const flashSaleId = createRes.response?.flash_sale_id;
   if (!flashSaleId) {
     return { success: false, message: 'Không nhận được flash_sale_id' };
   }
@@ -211,11 +286,11 @@ async function executeCopyFlashSale(
     { flash_sale_id: flashSaleId, items: itemsData }
   );
 
-  if (addRes.error) {
+  if (addRes.error && addRes.error !== '' && addRes.error !== '-') {
     return { 
       success: false, 
       flashSaleId,
-      message: `Tạo OK nhưng thêm SP lỗi: ${addRes.message}` 
+      message: `${isExisting ? 'Tìm thấy FS cũ' : 'Tạo OK'} nhưng thêm SP lỗi: ${addRes.message || addRes.error}` 
     };
   }
 
@@ -226,7 +301,7 @@ async function executeCopyFlashSale(
   return {
     success: true,
     flashSaleId,
-    message: `Thành công! ${successCount}/${totalItems} SP`,
+    message: `${isExisting ? 'Đã có FS, thêm' : 'Thành công!'} ${successCount}/${totalItems} SP`,
     failedItems: failedItems.length > 0 ? failedItems : undefined,
   };
 }

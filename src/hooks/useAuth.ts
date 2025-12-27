@@ -38,44 +38,79 @@ export function useAuth() {
   // Load profile khi có user
   const loadProfile = async (userId: string) => {
     const profile = await getUserProfile(userId);
-    setState(prev => ({ ...prev, profile: profile as Profile | null }));
+    setState(prev => ({ ...prev, profile: profile as Profile | null, isLoading: false }));
   };
 
   useEffect(() => {
+    let mounted = true;
+    let initialLoadDone = false;
+
     // Lấy session hiện tại
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setState(prev => ({
-        ...prev,
-        session,
-        user: session?.user ?? null,
-        isLoading: false,
-      }));
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!mounted) return;
       
-      // Load profile nếu có user
       if (session?.user) {
-        loadProfile(session.user.id);
+        // Có user -> load profile trước khi set isLoading = false
+        setState(prev => ({
+          ...prev,
+          session,
+          user: session.user,
+        }));
+        await loadProfile(session.user.id);
+      } else {
+        // Không có user -> set isLoading = false ngay
+        setState(prev => ({
+          ...prev,
+          session: null,
+          user: null,
+          isLoading: false,
+        }));
       }
+      initialLoadDone = true;
     });
 
     // Lắng nghe thay đổi auth state
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setState(prev => ({
-          ...prev,
-          session,
-          user: session?.user ?? null,
-          profile: session?.user ? prev.profile : null,
-          isLoading: false,
-        }));
+      async (event, session) => {
+        if (!mounted) return;
         
-        // Load profile nếu có user mới
-        if (session?.user) {
-          loadProfile(session.user.id);
+        // Bỏ qua INITIAL_SESSION vì đã xử lý ở getSession
+        if (event === 'INITIAL_SESSION') return;
+        
+        // Bỏ qua TOKEN_REFRESHED - không cần reload UI
+        if (event === 'TOKEN_REFRESHED') return;
+        
+        // Chỉ xử lý khi initial load đã xong
+        if (!initialLoadDone) return;
+
+        console.log('[useAuth] Auth state changed:', event);
+        
+        if (event === 'SIGNED_IN' && session?.user) {
+          // Chỉ reload nếu user khác
+          if (state.user?.id !== session.user.id) {
+            setState(prev => ({
+              ...prev,
+              session,
+              user: session.user,
+            }));
+            await loadProfile(session.user.id);
+          }
+        } else if (event === 'SIGNED_OUT') {
+          setState(prev => ({
+            ...prev,
+            session: null,
+            user: null,
+            profile: null,
+            isLoading: false,
+          }));
         }
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
 
@@ -195,7 +230,25 @@ export async function saveUserShop(
 ) {
   console.log('[saveUserShop] Starting...', { userId, shopId, partnerInfo });
 
-  // 1. Upsert vào bảng shops (token và partner info được lưu trong bảng shops)
+  // 1. Tạo shop member relationship TRƯỚC
+  // Điều này đảm bảo user có quyền update shop (RLS policy yêu cầu user là admin)
+  const { error: memberError } = await supabase
+    .from('shop_members')
+    .upsert({
+      user_id: userId,
+      shop_id: shopId,
+      role: 'admin', // User kết nối shop sẽ là admin của shop đó
+    }, {
+      onConflict: 'user_id,shop_id',
+    });
+
+  if (memberError) {
+    console.error('[saveUserShop] Shop member error:', memberError);
+    throw memberError;
+  }
+  console.log('[saveUserShop] shop_members upserted successfully');
+
+  // 2. Upsert vào bảng shops (token và partner info được lưu trong bảng shops)
   const shopData: any = {
     shop_id: shopId,
     access_token: accessToken,
@@ -225,23 +278,6 @@ export async function saveUserShop(
     throw shopError;
   }
   console.log('[saveUserShop] shops upserted successfully');
-
-  // 2. Tạo shop member relationship
-  const { error: memberError } = await supabase
-    .from('shop_members')
-    .upsert({
-      user_id: userId,
-      shop_id: shopId,
-      role: 'admin', // User kết nối shop sẽ là admin của shop đó
-    }, {
-      onConflict: 'user_id,shop_id',
-    });
-
-  if (memberError) {
-    console.error('[saveUserShop] Shop member error:', memberError);
-    throw memberError;
-  }
-  console.log('[saveUserShop] shop_members upserted successfully');
 }
 
 // Lấy thông tin shop của user thông qua shop_members
