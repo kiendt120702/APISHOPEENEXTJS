@@ -31,7 +31,7 @@ interface Shop {
   partner_name: string | null;
   created_at: string;
   token_updated_at: string | null;
-  token_expired_at: number | null;
+  expired_at: number | null;
 }
 
 interface ShopWithRole extends Shop {
@@ -84,7 +84,7 @@ export function ShopManagementPanel() {
 
       const { data: shopsData, error: shopsError } = await supabase
         .from('apishopee_shops')
-        .select('id, shop_id, shop_name, shop_logo, region, partner_id, partner_key, partner_name, created_at, token_updated_at, token_expired_at')
+        .select('id, shop_id, shop_name, shop_logo, region, partner_id, partner_key, partner_name, created_at, token_updated_at, expired_at')
         .in('id', shopIds);
 
       if (shopsError) throw shopsError;
@@ -271,10 +271,10 @@ export function ShopManagementPanel() {
       ),
     },
     {
-      key: 'token_expired_at',
+      key: 'expired_at',
       header: 'Token hết hạn',
       render: (shop: ShopWithRole) => (
-        <CellText muted>{formatDate(shop.token_expired_at)}</CellText>
+        <CellText muted>{formatDate(shop.expired_at)}</CellText>
       ),
     },
     {

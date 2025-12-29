@@ -37,7 +37,7 @@ export interface ApiShopeeShop {
     partner_name: string | null;
     access_token: string | null;
     refresh_token: string | null;
-    token_expired_at: number | null;
+    expired_at: number | null;
     token_updated_at: string | null;
     merchant_id: number | null;
     is_active: boolean;
