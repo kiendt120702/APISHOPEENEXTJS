@@ -67,11 +67,16 @@ export function ShopManagementPanel() {
   // Platform options
   const platforms = [
     { id: 'shopee', name: 'Shopee', icon: '🛒', color: 'bg-orange-500', available: true },
+    { id: 'nhanh', name: 'Nhanh.vn', icon: '⚡', color: 'bg-blue-500', available: true },
     { id: 'tiktok', name: 'TikTok Shop', icon: '🎵', color: 'bg-black', available: false },
     { id: 'facebook', name: 'Facebook', icon: '📘', color: 'bg-blue-600', available: false },
-    { id: 'nhanh', name: 'Nhanh.vn', icon: '⚡', color: 'bg-green-500', available: false },
-    { id: 'lazada', name: 'Lazada', icon: '🛍️', color: 'bg-blue-500', available: false },
+    { id: 'lazada', name: 'Lazada', icon: '🛍️', color: 'bg-purple-500', available: false },
   ];
+
+  // Nhanh.vn specific state
+  const [nhanhAppId, setNhanhAppId] = useState('');
+  const [nhanhSecretKey, setNhanhSecretKey] = useState('');
+  const [nhanhAppName, setNhanhAppName] = useState('');
 
   const loadShops = async () => {
     if (!user?.id) return;
@@ -309,6 +314,9 @@ export function ShopManagementPanel() {
     setPartnerIdInput('');
     setPartnerKeyInput('');
     setPartnerNameInput('');
+    setNhanhAppId('');
+    setNhanhSecretKey('');
+    setNhanhAppName('');
     setConnectDialogOpen(true);
   };
 
@@ -343,6 +351,53 @@ export function ShopManagementPanel() {
 
       await login(undefined, undefined, partnerInfo);
       // Dialog sẽ tự đóng khi redirect
+    } catch (err) {
+      toast({
+        title: 'Lỗi',
+        description: (err as Error).message,
+        variant: 'destructive',
+      });
+      setConnecting(false);
+    }
+  };
+
+  const handleSubmitNhanhConnect = async () => {
+    if (!nhanhAppId || !nhanhSecretKey) {
+      toast({
+        title: 'Lỗi',
+        description: 'Vui lòng nhập App ID và Secret Key',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setConnecting(true);
+    try {
+      // Lưu credentials vào sessionStorage để dùng khi callback
+      const credentials = {
+        appId: nhanhAppId.trim(),
+        secretKey: nhanhSecretKey.trim(),
+        appName: nhanhAppName.trim() || undefined,
+      };
+      sessionStorage.setItem('nhanh_credentials', JSON.stringify(credentials));
+
+      // Redirect đến trang cấp quyền Nhanh.vn
+      // URL format: https://nhanh.vn/oauth?version=3.0&appId=YOUR_APPID&returnLink=YOUR_RETURN_LINK
+      // Nhanh.vn yêu cầu returnLink phải là HTTPS, nên khi dev local phải dùng URL production
+      const productionUrl = process.env.NEXT_PUBLIC_NHANH_CALLBACK_URL || 'https://apishopeenextjs.vercel.app/auth/nhanh/callback';
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const callbackUrl = isLocalhost ? productionUrl : `${window.location.origin}/auth/nhanh/callback`;
+      
+      const params = new URLSearchParams({
+        version: '3.0',
+        appId: nhanhAppId.trim(),
+        returnLink: callbackUrl,
+      });
+      const authUrl = `https://nhanh.vn/oauth?${params.toString()}`;
+      
+      console.log('[Nhanh] Redirecting to:', authUrl);
+      console.log('[Nhanh] Callback URL:', callbackUrl);
+      window.location.href = authUrl;
     } catch (err) {
       toast({
         title: 'Lỗi',
@@ -677,6 +732,74 @@ export function ShopManagementPanel() {
                     </>
                   ) : (
                     'Kết nối với Shopee'
+                  )}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {/* Nhanh.vn form */}
+          {selectedPlatform === 'nhanh' && (
+            <>
+              <div className="space-y-4 py-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700">
+                  <p className="font-medium mb-1">Hướng dẫn:</p>
+                  <p>Để lấy App ID và Secret Key, bạn cần tạo App tại{' '}
+                    <a 
+                      href="https://nhanh.vn/app/manage" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="underline font-medium"
+                    >
+                      Quản lý App Nhanh.vn
+                    </a>
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="nhanh_app_id">App ID <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="nhanh_app_id"
+                    placeholder="Nhập App ID từ Nhanh.vn"
+                    value={nhanhAppId}
+                    onChange={(e) => setNhanhAppId(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="nhanh_secret_key">Secret Key <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="nhanh_secret_key"
+                    type="password"
+                    placeholder="Nhập Secret Key"
+                    value={nhanhSecretKey}
+                    onChange={(e) => setNhanhSecretKey(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="nhanh_app_name">Tên App (tùy chọn)</Label>
+                  <Input
+                    id="nhanh_app_name"
+                    placeholder="Đặt tên để dễ nhận biết"
+                    value={nhanhAppName}
+                    onChange={(e) => setNhanhAppName(e.target.value)}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setConnectDialogOpen(false)}>
+                  Hủy
+                </Button>
+                <Button
+                  className="bg-blue-500 hover:bg-blue-600"
+                  onClick={handleSubmitNhanhConnect}
+                  disabled={connecting || !nhanhAppId || !nhanhSecretKey}
+                >
+                  {connecting ? (
+                    <>
+                      <Spinner size="sm" className="mr-2" />
+                      Đang kết nối...
+                    </>
+                  ) : (
+                    'Kết nối với Nhanh.vn'
                   )}
                 </Button>
               </DialogFooter>

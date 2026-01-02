@@ -449,15 +449,17 @@ export default function DashboardLayout({
 
     // Get active menu from URL path
     const getActiveMenu = () => {
-        const directMatch = allMenuItems.find((m) => m.path === pathname);
-        if (directMatch) return directMatch.id;
-
+        // Ưu tiên check children trước
         for (const item of allMenuItems) {
             if (item.children) {
                 const childMatch = item.children.find((c) => c.path === pathname);
                 if (childMatch) return childMatch.id;
             }
         }
+        
+        // Nếu không match children thì check parent
+        const directMatch = allMenuItems.find((m) => m.path === pathname);
+        if (directMatch) return directMatch.id;
         return "dashboard";
     };
 
@@ -589,9 +591,6 @@ export default function DashboardLayout({
                                         onClick={() => {
                                             if (hasChildren) {
                                                 toggleSubmenu(item.id);
-                                                if (!item.children?.some((c) => c.id === activeMenu)) {
-                                                    handleNavigate(item.children![0].path);
-                                                }
                                             } else {
                                                 handleNavigate(item.path);
                                             }
@@ -652,7 +651,7 @@ export default function DashboardLayout({
                                                     className={cn(
                                                         "w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-sm",
                                                         activeMenu === child.id
-                                                            ? "bg-orange-50 text-orange-600 font-medium"
+                                                            ? "bg-gradient-to-r from-orange-100 to-orange-50 text-orange-600 font-medium border-l-2 border-orange-500"
                                                             : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
                                                     )}
                                                 >
