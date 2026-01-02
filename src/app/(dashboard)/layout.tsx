@@ -9,10 +9,11 @@ import { useState, useMemo, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useShopeeAuth } from "@/hooks/useShopeeAuth";
+import { useUnifiedShop } from "@/contexts/UnifiedShopContext";
 import { cn } from "@/lib/utils";
+import { ShopSwitcher } from "@/components/shop/ShopSwitcher";
 
 type MenuId =
-    | "dashboard"
     | "flash-sale"
     | "flash-sale-list"
     | "flash-sale-schedule"
@@ -20,6 +21,9 @@ type MenuId =
     | "ads-budget"
     | "ads-manage"
     | "account-health"
+    | "nhanh"
+    | "nhanh-products"
+    | "nhanh-inventory"
     | "profile"
     | "profile-info"
     | "profile-users"
@@ -35,13 +39,6 @@ interface MenuItem {
 }
 
 const menuItems: MenuItem[] = [
-    {
-        id: "dashboard",
-        path: "/dashboard",
-        label: "Tổng quan",
-        icon: <DashboardIcon />,
-        description: "Giới thiệu các chức năng",
-    },
     {
         id: "flash-sale",
         path: "/flash-sale",
@@ -76,6 +73,27 @@ const menuItems: MenuItem[] = [
         label: "Sức khỏe Shop",
         icon: <HealthIcon />,
         description: "Theo dõi hiệu suất và vi phạm",
+    },
+    {
+        id: "nhanh",
+        path: "/nhanh",
+        label: "Nhanh.vn",
+        icon: <NhanhIcon />,
+        description: "Quản lý dữ liệu từ Nhanh.vn",
+        children: [
+            {
+                id: "nhanh-products",
+                path: "/nhanh/products",
+                label: "Sản phẩm",
+                icon: <ProductIcon />,
+            },
+            {
+                id: "nhanh-inventory",
+                path: "/nhanh/inventory",
+                label: "Tồn kho",
+                icon: <InventoryIcon />,
+            },
+        ],
     },
     {
         id: "profile",
@@ -210,6 +228,78 @@ function HealthIcon() {
     );
 }
 
+function NhanhIcon() {
+    return (
+        <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+        >
+            <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M13 10V3L4 14h7v7l9-11h-7z"
+            />
+        </svg>
+    );
+}
+
+function ProductIcon() {
+    return (
+        <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+        >
+            <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+            />
+        </svg>
+    );
+}
+
+function OrderIcon() {
+    return (
+        <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+        >
+            <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+            />
+        </svg>
+    );
+}
+
+function InventoryIcon() {
+    return (
+        <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+        >
+            <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+            />
+        </svg>
+    );
+}
+
 function UserIcon() {
     return (
         <svg
@@ -264,140 +354,6 @@ function ShopIcon() {
     );
 }
 
-// Shop Selector Component
-function ShopSelector() {
-    const { token, shops, selectedShopId, switchShop, isLoading } =
-        useShopeeAuth();
-    const [open, setOpen] = useState(false);
-
-    const currentShop =
-        shops.find((s) => s.shop_id === selectedShopId) ||
-        (token?.shop_id
-            ? { shop_id: token.shop_id, shop_name: `Shop ${token.shop_id}`, region: "VN" }
-            : null);
-
-    if (!currentShop) return null;
-
-    const handleSwitchShop = async (shopId: number) => {
-        setOpen(false);
-        if (shopId !== selectedShopId) {
-            await switchShop(shopId);
-            window.location.reload();
-        }
-    };
-
-    return (
-        <div className="relative">
-            <button
-                onClick={() => setOpen(!open)}
-                disabled={isLoading || shops.length <= 1}
-                className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors",
-                    shops.length > 1
-                        ? "bg-orange-50 border-orange-200 hover:bg-orange-100 cursor-pointer"
-                        : "bg-slate-50 border-slate-200 cursor-default"
-                )}
-            >
-                <div className="w-6 h-6 bg-orange-100 rounded flex items-center justify-center">
-                    <svg
-                        className="w-4 h-4 text-orange-600"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                    >
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-                        />
-                    </svg>
-                </div>
-                <div className="text-left">
-                    <p className="text-sm font-medium text-slate-700 max-w-[150px] truncate">
-                        {currentShop.shop_name || `Shop ${currentShop.shop_id}`}
-                    </p>
-                </div>
-                {shops.length > 1 && (
-                    <svg
-                        className={cn(
-                            "w-4 h-4 text-slate-400 transition-transform",
-                            open && "rotate-180"
-                        )}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                    >
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 9l-7 7-7-7"
-                        />
-                    </svg>
-                )}
-            </button>
-
-            {/* Dropdown */}
-            {open && shops.length > 1 && (
-                <>
-                    <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-                    <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-lg border border-slate-200 py-2 z-20 max-h-80 overflow-auto">
-                        <p className="px-3 py-1 text-xs text-slate-400 font-medium">
-                            Chọn shop
-                        </p>
-                        {shops.map((shop) => (
-                            <button
-                                key={shop.shop_id}
-                                onClick={() => handleSwitchShop(shop.shop_id)}
-                                className={cn(
-                                    "w-full px-3 py-2 text-left hover:bg-slate-50 flex items-center gap-3",
-                                    shop.shop_id === selectedShopId && "bg-orange-50"
-                                )}
-                            >
-                                <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                                    <svg
-                                        className="w-4 h-4 text-orange-600"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
-                                    >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-                                        />
-                                    </svg>
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-slate-700 truncate">
-                                        {shop.shop_name || `Shop ${shop.shop_id}`}
-                                    </p>
-                                    <p className="text-xs text-slate-400">ID: {shop.shop_id}</p>
-                                </div>
-                                {shop.shop_id === selectedShopId && (
-                                    <svg
-                                        className="w-4 h-4 text-orange-500"
-                                        fill="currentColor"
-                                        viewBox="0 0 20 20"
-                                    >
-                                        <path
-                                            fillRule="evenodd"
-                                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                                            clipRule="evenodd"
-                                        />
-                                    </svg>
-                                )}
-                            </button>
-                        ))}
-                    </div>
-                </>
-            )}
-        </div>
-    );
-}
-
 export default function DashboardLayout({
     children,
 }: {
@@ -415,37 +371,86 @@ export default function DashboardLayout({
         signOut,
     } = useAuth();
     const { token, isLoading: isShopeeLoading, shops } = useShopeeAuth();
+    const { selectedShop } = useUnifiedShop();
+
+    // Get current platform from selected shop
+    const currentPlatform = selectedShop?.platform || null;
 
     // TODO: Implement proper role check when needed
     // sys_profiles không có role, cần check từ apishopee_shop_members
     const canManageUsers = true; // Tạm cho phép tất cả
 
-    // Filter menu items based on role
+    // Filter menu items based on role and platform
     const allMenuItems = useMemo(() => {
-        return menuItems.map((item) => {
-            if (item.id === "profile" && item.children) {
-                return {
-                    ...item,
-                    children: item.children.filter((child) => {
-                        if (child.id === "profile-users" && !canManageUsers) {
-                            return false;
-                        }
-                        return true;
-                    }),
-                };
-            }
-            return item;
-        });
-    }, [canManageUsers]);
+        // Shopee menu IDs
+        const shopeeMenuIds = ["flash-sale", "ads", "account-health"];
+        // Nhanh menu IDs
+        const nhanhMenuIds = ["nhanh"];
+        // Always show
+        const alwaysShowIds = ["profile"];
+
+        return menuItems
+            .filter((item) => {
+                // Always show profile
+                if (alwaysShowIds.includes(item.id)) return true;
+                
+                // If no shop selected, show all menus
+                if (!currentPlatform) return true;
+                
+                // Filter based on platform
+                if (currentPlatform === "nhanh") {
+                    return nhanhMenuIds.includes(item.id);
+                } else if (currentPlatform === "shopee") {
+                    return shopeeMenuIds.includes(item.id);
+                }
+                
+                return true;
+            })
+            .map((item) => {
+                if (item.id === "profile" && item.children) {
+                    return {
+                        ...item,
+                        children: item.children.filter((child) => {
+                            if (child.id === "profile-users" && !canManageUsers) {
+                                return false;
+                            }
+                            return true;
+                        }),
+                    };
+                }
+                return item;
+            });
+    }, [canManageUsers, currentPlatform]);
 
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [showUserMenu, setShowUserMenu] = useState(false);
     const [expandedMenus, setExpandedMenus] = useState<string[]>([
         "flash-sale",
         "ads",
+        "nhanh",
     ]);
 
-    const isShopConnected = !!token?.shop_id;
+    // Auto-redirect when shop platform changes
+    useEffect(() => {
+        if (!currentPlatform) return;
+        
+        // Check if current path matches the platform
+        const isOnNhanhPage = pathname.startsWith("/nhanh");
+        const isOnShopeePage = pathname.startsWith("/flash-sale") || 
+                               pathname.startsWith("/ads") || 
+                               pathname.startsWith("/account-health");
+        const isOnProfilePage = pathname.startsWith("/profile");
+        
+        // Don't redirect if on profile page
+        if (isOnProfilePage) return;
+        
+        // Redirect if on wrong platform page
+        if (currentPlatform === "nhanh" && !isOnNhanhPage) {
+            router.replace("/nhanh/products");
+        } else if (currentPlatform === "shopee" && !isOnShopeePage) {
+            router.replace("/flash-sale");
+        }
+    }, [currentPlatform, pathname, router]);
 
     // Get active menu from URL path
     const getActiveMenu = () => {
@@ -460,7 +465,10 @@ export default function DashboardLayout({
         // Nếu không match children thì check parent
         const directMatch = allMenuItems.find((m) => m.path === pathname);
         if (directMatch) return directMatch.id;
-        return "dashboard";
+        
+        // Default based on platform
+        if (currentPlatform === "nhanh") return "nhanh-products";
+        return "flash-sale";
     };
 
     const activeMenu = getActiveMenu();
@@ -760,11 +768,11 @@ export default function DashboardLayout({
                                     allMenuItems
                                         .flatMap((m) => m.children || [])
                                         .find((c) => c.id === activeMenu)?.label ||
-                                    "Dashboard"}
+                                    "Flash Sale"}
                             </h2>
                         </div>
                         <div className="flex items-center gap-3">
-                            {isShopConnected && <ShopSelector />}
+                            <ShopSwitcher />
                         </div>
                     </header>
 

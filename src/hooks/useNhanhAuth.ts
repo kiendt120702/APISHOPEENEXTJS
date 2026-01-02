@@ -64,7 +64,9 @@ export function useNhanhAuth(): UseNhanhAuthReturn {
   // Load connections từ database
   const loadConnections = useCallback(async (uid: string) => {
     try {
+      console.log('[NhanhAuth] loadConnections called for uid:', uid);
       const userConnections = await getUserNhanhConnections(uid);
+      console.log('[NhanhAuth] userConnections from DB:', userConnections);
       const mapped: NhanhConnectionInfo[] = userConnections.map((conn: Record<string, unknown>) => ({
         id: conn.id as string,
         businessId: conn.business_id as number,
@@ -74,6 +76,7 @@ export function useNhanhAuth(): UseNhanhAuthReturn {
         isActive: conn.is_active as boolean,
         connectedAt: conn.connected_at as string,
       }));
+      console.log('[NhanhAuth] mapped connections:', mapped);
       setConnections(mapped);
       return mapped;
     } catch (err) {
@@ -85,7 +88,10 @@ export function useNhanhAuth(): UseNhanhAuthReturn {
   // Load token từ localStorage hoặc database
   const loadToken = useCallback(async (uid: string, targetBusinessId?: number) => {
     try {
-      // 1. Thử load từ localStorage trước
+      // Luôn load connections từ database trước
+      const userConnections = await loadConnections(uid);
+      
+      // 1. Thử load từ localStorage trước (nếu không có targetBusinessId)
       const storedToken = await getStoredNhanhToken();
       if (storedToken && !targetBusinessId) {
         setToken(storedToken);
@@ -93,9 +99,7 @@ export function useNhanhAuth(): UseNhanhAuthReturn {
         return true;
       }
 
-      // 2. Load từ database nếu có targetBusinessId
-      const userConnections = await loadConnections(uid);
-      
+      // 2. Load từ database nếu có targetBusinessId hoặc không có stored token
       if (userConnections.length > 0) {
         const targetConn = targetBusinessId 
           ? userConnections.find(c => c.businessId === targetBusinessId)
@@ -123,9 +127,7 @@ export function useNhanhAuth(): UseNhanhAuthReturn {
             return true;
           }
         }
-      }
-
-      return false;
+      }      return false;
     } catch (err) {
       console.error('[NhanhAuth] Error loading token:', err);
       return false;

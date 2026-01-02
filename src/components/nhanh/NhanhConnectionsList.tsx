@@ -46,10 +46,16 @@ export function NhanhConnectionsList() {
     switchBusiness, 
     removeConnection,
     refreshConnections,
+    error,
   } = useNhanhAuth();
   
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Debug log
+  console.log('[NhanhConnectionsList] connections:', connections);
+  console.log('[NhanhConnectionsList] isLoading:', isLoading);
+  console.log('[NhanhConnectionsList] error:', error);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);

@@ -37,6 +37,26 @@ export {
   removeNhanhConnection,
 } from './supabase-client';
 
+// API Client
+export {
+  getNhanhProducts,
+  getNhanhOrders,
+  getNhanhOrderDetail,
+  getNhanhWarehouses,
+  getNhanhCategories,
+  getNhanhInventory,
+} from './api-client';
+
+export type {
+  NhanhProductsResponse,
+  NhanhOrdersResponse,
+  NhanhWarehousesResponse,
+  NhanhCategoriesResponse,
+  NhanhInventoryResponse,
+  NhanhCategory,
+  NhanhInventoryItem,
+} from './api-client';
+
 // Types
 export type {
   NhanhAccessToken,
@@ -45,6 +65,7 @@ export type {
   NhanhApiResponse,
   NhanhWarehouse,
   NhanhProduct,
+  NhanhProductInventory,
   NhanhOrder,
 } from './types';
 

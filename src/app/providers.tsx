@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { UnifiedShopProvider } from "@/contexts/UnifiedShopContext";
 
 export function Providers({ children }: { children: React.ReactNode }) {
     const [queryClient] = useState(
@@ -23,9 +24,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <QueryClientProvider client={queryClient}>
             <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
                 <TooltipProvider>
-                    <Toaster />
-                    <Sonner />
-                    {children}
+                    <UnifiedShopProvider>
+                        <Toaster />
+                        <Sonner />
+                        {children}
+                    </UnifiedShopProvider>
                 </TooltipProvider>
             </ThemeProvider>
         </QueryClientProvider>

@@ -50,18 +50,80 @@ export interface NhanhWarehouse {
   isDefault?: boolean;
 }
 
+// Product inventory từ Nhanh.vn v3.0
+export interface NhanhProductInventory {
+  remain?: number;
+  shipping?: number;
+  damaged?: number;
+  holding?: number;
+  transfering?: number;
+  available?: number;
+  warranty?: {
+    remain?: number;
+    holding?: number;
+  };
+  depots?: Array<{
+    id: number;
+    remain?: number;
+    shipping?: number;
+    damaged?: number;
+    holding?: number;
+    transfering?: number;
+    available?: number;
+    warranty?: {
+      remain?: number;
+      holding?: number;
+    };
+  }>;
+}
+
+// Product prices từ Nhanh.vn
+export interface NhanhProductPrices {
+  retail?: number;
+  import?: number;
+  old?: number;
+  wholesale?: number;
+  avgCost?: number;
+}
+
 // Product từ Nhanh.vn
 export interface NhanhProduct {
   id: number;
+  parentId?: number;
   code?: string;
   barcode?: string;
   name: string;
-  price: number;
-  oldPrice?: number;
+  otherName?: string;
   status: number;
+  vat?: number;
   categoryId?: number;
+  internalCategoryId?: number;
   brandId?: number;
-  inventory?: number;
+  type?: number;
+  countryName?: string;
+  // Legacy fields (v2)
+  price?: number;
+  oldPrice?: number;
+  // New fields (v3)
+  prices?: NhanhProductPrices;
+  inventory?: number | NhanhProductInventory;
+  images?: {
+    avatar?: string;
+    others?: string[];
+  };
+  shipping?: {
+    width?: number;
+    height?: number;
+    length?: number;
+    weight?: number;
+  };
+  attributes?: Array<{
+    id: number;
+    name: string;
+    value: string;
+  }>;
+  updatedAt?: number;
+  createdAt?: number;
 }
 
 // Order từ Nhanh.vn

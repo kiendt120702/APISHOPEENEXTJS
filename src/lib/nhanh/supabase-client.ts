@@ -141,6 +141,21 @@ export async function saveNhanhConnection(
   console.log('[Nhanh] businessId:', token.businessId);
   console.log('[Nhanh] appId:', credentials.appId);
 
+  // Đảm bảo permissions, depot_ids, page_ids là array
+  const parseToArray = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+      if (value === 'All') return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
   const connectionData = {
     user_id: userId,
     business_id: token.businessId,
@@ -149,10 +164,10 @@ export async function saveNhanhConnection(
     app_id: credentials.appId,
     app_name: credentials.appName,
     secret_key: credentials.secretKey,
-    permissions: token.permissions || [],
+    permissions: parseToArray(token.permissions),
     expired_at: token.expiredAt,
-    depot_ids: token.depotIds || [],
-    page_ids: token.pageIds || [],
+    depot_ids: parseToArray(token.depotIds),
+    page_ids: parseToArray(token.pageIds),
     version: token.version || '3.0',
     is_active: true,
     connected_at: new Date().toISOString(),
@@ -181,12 +196,16 @@ export async function saveNhanhConnection(
  * Lấy danh sách kết nối Nhanh.vn của user
  */
 export async function getUserNhanhConnections(userId: string) {
+  console.log('[Nhanh] getUserNhanhConnections called for userId:', userId);
+  
   const { data, error } = await supabase
     .from('nhanh_connections')
     .select('*')
     .eq('user_id', userId)
     .eq('is_active', true)
     .order('connected_at', { ascending: false });
+
+  console.log('[Nhanh] getUserNhanhConnections result:', { data, error });
 
   if (error) {
     console.error('[Nhanh] Failed to get connections:', error);
