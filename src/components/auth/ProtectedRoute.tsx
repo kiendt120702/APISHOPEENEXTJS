@@ -1,8 +1,6 @@
-"use client";
-
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/hooks/useAuth";
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -12,26 +10,17 @@ interface ProtectedRouteProps {
 
 /**
  * ProtectedRoute - Component bảo vệ route yêu cầu đăng nhập
- * 
- * @param children - Nội dung được bảo vệ
- * @param redirectTo - URL redirect khi chưa đăng nhập (default: /auth)
- * @param requireShop - Yêu cầu phải có shop được kết nối (default: false)
  */
-export function ProtectedRoute({
-  children,
-  redirectTo = "/auth",
-  requireShop = false,
-}: ProtectedRouteProps) {
-  const router = useRouter();
+export function ProtectedRoute({ children, redirectTo = '/auth', requireShop: _requireShop = false }: ProtectedRouteProps) {
+  const navigate = useNavigate();
   const { isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      router.replace(redirectTo);
+      navigate(redirectTo, { replace: true });
     }
-  }, [isLoading, isAuthenticated, router, redirectTo]);
+  }, [isLoading, isAuthenticated, navigate, redirectTo]);
 
-  // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
@@ -43,7 +32,6 @@ export function ProtectedRoute({
     );
   }
 
-  // Not authenticated
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">

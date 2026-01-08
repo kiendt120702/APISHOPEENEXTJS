@@ -21,7 +21,7 @@ interface TimeSlot {
 interface ApiResponse {
   error?: string;
   message?: string;
-  response?: TimeSlot[];
+  response?: TimeSlot[] | { time_slot_id?: TimeSlot[] };
 }
 
 export default function TimeSlotsPanel() {
@@ -114,8 +114,11 @@ export default function TimeSlotsPanel() {
         return;
       }
 
-      // Shopee API trả về { response: { time_slot_id: [...] } }
-      const timeSlotsData = data?.response?.time_slot_id || data?.response || [];
+      // Shopee API trả về { response: { time_slot_id: [...] } } hoặc { response: [...] }
+      const responseData = data?.response;
+      const timeSlotsData = Array.isArray(responseData) 
+        ? responseData 
+        : (responseData as { time_slot_id?: TimeSlot[] })?.time_slot_id || [];
       setTimeSlots(timeSlotsData);
       toast({ title: 'Thành công', description: `Tìm thấy ${timeSlotsData.length || 0} time slots` });
     } catch (err) {

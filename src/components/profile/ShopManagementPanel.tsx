@@ -609,3 +609,6 @@ export function ShopManagementPanel() {
     </div>
   );
 }
+
+
+export default ShopManagementPanel;

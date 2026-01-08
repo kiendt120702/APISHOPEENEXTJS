@@ -104,7 +104,7 @@ export class EncryptedLocalStorageTokenStorage implements TokenStorage {
 
     // Use provided key or generate from environment/default
     this.encryptionKey = encryptionKey
-      || process.env.NEXT_PUBLIC_TOKEN_ENCRYPTION_KEY
+      || import.meta.env.VITE_TOKEN_ENCRYPTION_KEY
       || this.generateDefaultKey();
   }
 

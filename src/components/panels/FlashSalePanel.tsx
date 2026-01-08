@@ -319,13 +319,18 @@ const FlashSalePanel = forwardRef<FlashSalePanelRef>((_, ref) => {
     if (token?.shop_id) loadFlashSalesFromDB();
   }, [token?.shop_id]);
 
-  const fetchItems = async (flashSaleId: number) => {
-    if (!token?.shop_id) return;
+  const fetchItems = async (flashSaleId: number, shopId?: number) => {
+    const effectiveShopId = shopId || token?.shop_id;
+    if (!effectiveShopId) {
+      console.warn('[DEBUG] fetchItems: No shop_id');
+      return;
+    }
     setLoadingItems(true);
     try {
       const { data, error } = await supabase.functions.invoke('apishopee-flash-sale', {
-        body: { action: 'get-items', shop_id: token.shop_id, flash_sale_id: flashSaleId, offset: 0, limit: 100 },
+        body: { action: 'get-items', shop_id: effectiveShopId, flash_sale_id: flashSaleId, offset: 0, limit: 100 },
       });
+      console.log('[DEBUG] fetchItems response:', data);
       if (error) throw error;
       setItemsInfo(data?.response?.item_info || []);
       setModels(data?.response?.models || []);
@@ -336,23 +341,54 @@ const FlashSalePanel = forwardRef<FlashSalePanelRef>((_, ref) => {
     }
   };
 
-  const fetchTimeSlots = async () => {
-    if (!token?.shop_id) return;
+  const fetchTimeSlots = async (shopId?: number) => {
+    const effectiveShopId = shopId || token?.shop_id;
+    console.log('[DEBUG] fetchTimeSlots called, effectiveShopId:', effectiveShopId);
+    
+    if (!effectiveShopId) {
+      console.warn('[DEBUG] No shop_id, skipping fetchTimeSlots');
+      return;
+    }
     setLoadingTimeSlots(true);
     try {
       const now = Math.floor(Date.now() / 1000) + 60;
-      const shopUuid = await getShopUuidFromShopId(token.shop_id);
+      const shopUuid = await getShopUuidFromShopId(effectiveShopId);
+      console.log('[DEBUG] shopUuid:', shopUuid);
 
       const [timeSlotsRes, scheduledRes] = await Promise.all([
         supabase.functions.invoke('apishopee-flash-sale', {
-          body: { action: 'get-time-slots', shop_id: token.shop_id, start_time: now, end_time: now + 30 * 24 * 60 * 60 },
+          body: { action: 'get-time-slots', shop_id: effectiveShopId, start_time: now, end_time: now + 30 * 24 * 60 * 60 },
         }),
         shopUuid ? supabase.from('apishopee_scheduled_flash_sales').select('target_timeslot_id').eq('shop_id', shopUuid).eq('status', 'pending') : Promise.resolve({ data: null, error: null })
       ]);
 
-      if (timeSlotsRes.error) throw timeSlotsRes.error;
-      // Shopee API trả về { response: { time_slot_id: [...] } }
-      const timeSlotsData = timeSlotsRes.data?.response?.time_slot_id || timeSlotsRes.data?.response || [];
+      console.log('[DEBUG] timeSlotsRes full:', timeSlotsRes);
+      console.log('[DEBUG] timeSlotsRes.data:', JSON.stringify(timeSlotsRes.data, null, 2));
+      
+      if (timeSlotsRes.error) {
+        console.error('[DEBUG] timeSlotsRes.error:', timeSlotsRes.error);
+        throw timeSlotsRes.error;
+      }
+
+      // Check for API error in response
+      if (timeSlotsRes.data?.error) {
+        console.error('[DEBUG] API error:', timeSlotsRes.data.error, timeSlotsRes.data.message);
+        toast({ title: 'Lỗi API', description: timeSlotsRes.data.message || timeSlotsRes.data.error, variant: 'destructive' });
+        setTimeSlots([]);
+        return;
+      }
+      
+      // Shopee API trả về { response: [...] } - response là array trực tiếp
+      // Mỗi item có: { timeslot_id, start_time, end_time }
+      const timeSlotsData = timeSlotsRes.data?.response?.time_slot_id 
+        || (Array.isArray(timeSlotsRes.data?.response) ? timeSlotsRes.data.response : []);
+      console.log('[DEBUG] timeSlotsData parsed:', timeSlotsData);
+      console.log('[DEBUG] timeSlotsData length:', timeSlotsData.length);
+      
+      if (timeSlotsData.length === 0) {
+        console.warn('[DEBUG] No time slots returned from API');
+      }
+      
       setTimeSlots(timeSlotsData);
 
       const scheduledSet = new Set<number>();
@@ -361,6 +397,7 @@ const FlashSalePanel = forwardRef<FlashSalePanelRef>((_, ref) => {
       }
       setScheduledTimeslots(scheduledSet);
     } catch (err) {
+      console.error('[DEBUG] fetchTimeSlots error:', err);
       toast({ title: 'Lỗi', description: (err as Error).message, variant: 'destructive' });
     } finally {
       setLoadingTimeSlots(false);
@@ -368,11 +405,29 @@ const FlashSalePanel = forwardRef<FlashSalePanelRef>((_, ref) => {
   };
 
   const handleOpenCopyDialogForSale = (sale: FlashSale) => {
+    console.log('[DEBUG] handleOpenCopyDialogForSale called, sale:', sale);
     setSelectedSale(sale);
     setSelectedTimeSlots([]);
     setShowCopyDialog(true);
-    fetchItems(sale.flash_sale_id);
-    fetchTimeSlots();
+    
+    // Lấy shop_id từ localStorage vì token có thể chưa được cập nhật trong closure
+    let shopId = token?.shop_id;
+    if (!shopId) {
+      // Try default key first
+      const storedToken = localStorage.getItem('shopee_token_default');
+      if (storedToken) {
+        try {
+          const parsed = JSON.parse(storedToken);
+          shopId = parsed.shop_id;
+          console.log('[DEBUG] Got shop_id from shopee_token_default:', shopId);
+        } catch (e) {
+          console.error('[DEBUG] Failed to parse stored token:', e);
+        }
+      }
+    }
+    
+    fetchItems(sale.flash_sale_id, shopId);
+    fetchTimeSlots(shopId);
   };
 
   const handleDeleteFlashSale = async () => {
@@ -766,6 +821,10 @@ const FlashSalePanel = forwardRef<FlashSalePanelRef>((_, ref) => {
               </div>
               {loadingTimeSlots ? (
                 <div className="text-center py-6 text-slate-400 text-sm">Đang tải...</div>
+              ) : timeSlots.length === 0 ? (
+                <div className="text-center py-6 text-slate-400 text-sm">
+                  Không có time slot khả dụng. Vui lòng kiểm tra console log để biết chi tiết.
+                </div>
               ) : (
                 <div className="flex flex-col gap-1.5 max-h-[350px] overflow-y-auto">
                   {timeSlots.map(slot => {

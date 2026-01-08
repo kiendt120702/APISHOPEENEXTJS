@@ -1,6 +1,5 @@
 /**
  * Shopee Authentication Hook
- * React hook để quản lý authentication state với Supabase backend
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -8,7 +7,6 @@ import {
   getStoredToken,
   storeToken,
   clearToken,
-  isTokenValid,
   isSupabaseConfigured,
   getAuthorizationUrl,
   authenticateWithCode,
@@ -52,7 +50,7 @@ interface UseShopeeAuthReturn {
 }
 
 const DEFAULT_CALLBACK =
-  process.env.NEXT_PUBLIC_SHOPEE_CALLBACK_URL ||
+  import.meta.env.VITE_SHOPEE_CALLBACK_URL ||
   (typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : 'https://apishopeenextjs.vercel.app/auth/callback');
 
 export function useShopeeAuth(): UseShopeeAuthReturn {
@@ -67,17 +65,15 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
   const isConfigured = isConfigValid() || useBackend;
   const isAuthenticated = !!token && !error;
 
-  // Function load token từ localStorage hoặc database
   const loadTokenFromSource = useCallback(async (userId?: string, targetShopId?: number) => {
     try {
       let tokenLoaded = false;
       let localShopId: number | null = null;
 
-      // 1. Thử load từ localStorage trước (nếu không có targetShopId)
+      // Only load from localStorage if NOT switching to a specific shop
       if (!targetShopId) {
         const storedToken = await getStoredToken();
         if (storedToken?.shop_id && storedToken?.access_token) {
-          console.log('[AUTH] Token loaded from localStorage, shop_id:', storedToken.shop_id);
           setToken(storedToken);
           setSelectedShopId(storedToken.shop_id);
           localShopId = storedToken.shop_id;
@@ -85,16 +81,10 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
         }
       }
 
-      // 2. Load danh sách shops từ database (đã được tối ưu với JOIN query)
       if (userId) {
-        console.log('[AUTH] Checking database for user:', userId);
-
-        // getUserShops đã trả về đầy đủ thông tin shop
         const userShops = await getUserShops(userId);
-        console.log('[AUTH] User shops from database:', userShops);
 
         if (userShops && userShops.length > 0) {
-          // Cập nhật danh sách shops từ kết quả getUserShops
           const shopInfoList: ShopInfo[] = userShops.map((shop: any) => ({
             shop_id: shop.shop_id,
             shop_name: shop.shop_name,
@@ -104,16 +94,15 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
           }));
           setShops(shopInfoList);
 
-          // Nếu đã load token từ localStorage, không cần load lại
-          if (tokenLoaded) {
+          // If switching to specific shop, always load that shop's token
+          // If not switching and already loaded from localStorage, skip
+          if (!targetShopId && tokenLoaded) {
             return true;
           }
 
-          // Chọn shop: ưu tiên targetShopId, sau đó localStorage, cuối cùng là shop đầu tiên
           const shopToLoadId = targetShopId || localShopId || userShops[0]?.shop_id;
           
           if (shopToLoadId) {
-            // Chỉ query token khi cần (không có trong localStorage)
             const { data: shopData } = await supabase
               .from('apishopee_shops')
               .select('shop_id, access_token, refresh_token, expired_at, merchant_id')
@@ -133,20 +122,17 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
               await storeToken(dbToken);
               setToken(dbToken);
               setSelectedShopId(shopData.shop_id);
-              console.log('[AUTH] Token restored from shops table, shop_id:', shopData.shop_id);
               return true;
             }
           }
         }
       }
       return tokenLoaded;
-    } catch (err) {
-      console.error('[AUTH] Error loading token:', err);
+    } catch {
       return false;
     }
   }, []);
 
-  // Load token on mount và khi auth state thay đổi
   useEffect(() => {
     let mounted = true;
     let initialLoadDone = false;
@@ -160,8 +146,8 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
             await loadTokenFromSource(session.user.id);
           }
         }
-      } catch (err) {
-        console.error('[AUTH] Error in initLoad:', err);
+      } catch {
+        // ignore init error
       } finally {
         if (mounted) {
           setIsLoading(false);
@@ -172,24 +158,14 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
 
     initLoad();
 
-    // Lắng nghe auth state change để reload token khi đăng nhập
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return;
-
-        // Bỏ qua INITIAL_SESSION vì đã xử lý ở getSession
         if (event === 'INITIAL_SESSION') return;
-
-        // Bỏ qua TOKEN_REFRESHED - không cần reload UI
         if (event === 'TOKEN_REFRESHED') return;
-
-        // Chỉ xử lý khi initial load đã xong
         if (!initialLoadDone) return;
 
-        console.log('[AUTH] Auth state changed:', event);
-
         if (event === 'SIGNED_IN' && session?.user) {
-          // Chỉ reload nếu user khác hoặc chưa có token
           const currentUserId = user?.id;
           if (currentUserId !== session.user.id || !token) {
             setUser({ id: session.user.id, email: session.user.email });
@@ -210,11 +186,8 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
     };
   }, [loadTokenFromSource]);
 
-  // Redirect to Shopee login
   const login = useCallback(
     async (callbackUrl = DEFAULT_CALLBACK, partnerAccountId?: string, partnerInfo?: PartnerInfo) => {
-      console.log('[AUTH] login() called, isConfigured:', isConfigured, 'callbackUrl:', callbackUrl, 'partnerInfo:', partnerInfo);
-
       if (!isConfigured && !partnerInfo) {
         setError('SDK not configured. Please provide partner credentials.');
         return;
@@ -224,17 +197,13 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
       setError(null);
 
       try {
-        // Lưu partner info vào sessionStorage để dùng khi callback
         if (partnerInfo) {
           sessionStorage.setItem('shopee_partner_info', JSON.stringify(partnerInfo));
         }
 
-        console.log('[AUTH] Getting authorization URL...');
         const authUrl = await getAuthorizationUrl(callbackUrl, partnerAccountId, partnerInfo);
-        console.log('[AUTH] Redirecting to:', authUrl);
         window.location.href = authUrl;
       } catch (err) {
-        console.error('[AUTH] Login error:', err);
         setError(err instanceof Error ? err.message : 'Failed to get auth URL');
         setIsLoading(false);
       }
@@ -242,24 +211,20 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
     [isConfigured]
   );
 
-  // Handle OAuth callback
   const handleCallback = useCallback(
     async (code: string, shopId?: number, partnerAccountId?: string) => {
       setIsLoading(true);
       setError(null);
 
-      // Lấy partner info từ sessionStorage
       const partnerInfoStr = sessionStorage.getItem('shopee_partner_info');
       const partnerInfo = partnerInfoStr ? JSON.parse(partnerInfoStr) : null;
 
       try {
         const newToken = await authenticateWithCode(code, shopId, partnerAccountId, partnerInfo);
 
-        // Store locally
         await storeToken(newToken);
         setToken(newToken);
 
-        // Lưu vào database nếu user đã đăng nhập
         try {
           const { data: { user } } = await supabase.auth.getUser();
           if (user && newToken.shop_id && newToken.access_token && newToken.refresh_token) {
@@ -270,30 +235,25 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
               newToken.refresh_token,
               newToken.expired_at || Date.now() + 4 * 60 * 60 * 1000,
               newToken.merchant_id,
-              undefined, // không còn partner_account_id
-              partnerInfo // truyền partner info để lưu vào shops
+              undefined,
+              partnerInfo
             );
 
             console.log('[AUTH] Shop and token saved to database');
 
-            // Sync shop info từ Shopee API để lấy shop_name
             try {
-              const { data: shopInfoData } = await supabase.functions.invoke('apishopee-shop', {
+              await supabase.functions.invoke('apishopee-shop', {
                 body: { action: 'get-full-info', shop_id: newToken.shop_id, force_refresh: true },
               });
-              console.log('[AUTH] Shop info synced:', shopInfoData);
-            } catch (syncErr) {
-              console.warn('[AUTH] Failed to sync shop info:', syncErr);
+            } catch {
+              // ignore sync error
             }
           }
-        } catch (dbErr) {
-          console.warn('[AUTH] Failed to save shop to database:', dbErr);
+        } catch {
+          // ignore db save error
         }
 
-        // Clear sessionStorage
         sessionStorage.removeItem('shopee_partner_info');
-
-        console.log('[AUTH] Authentication successful, shop_id:', newToken.shop_id);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Authentication failed');
         throw err;
@@ -304,7 +264,6 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
     []
   );
 
-  // Logout - clear token
   const logout = useCallback(async () => {
     try {
       await clearToken();
@@ -315,7 +274,6 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
     }
   }, []);
 
-  // Refresh token
   const refresh = useCallback(async () => {
     if (!token?.refresh_token) {
       setError('No refresh token available');
@@ -328,20 +286,15 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
     try {
       const newToken = await refreshToken(token.refresh_token, token.shop_id, token.merchant_id);
 
-      // Store locally
       await storeToken(newToken);
       setToken(newToken);
-
-      console.log('[AUTH] Token refreshed successfully');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh token');
-      console.error('[AUTH] Token refresh failed:', err);
     } finally {
       setIsLoading(false);
     }
   }, [token]);
 
-  // Switch to another shop
   const switchShop = useCallback(async (shopId: number) => {
     if (!user?.id) {
       setError('User not authenticated');
@@ -349,7 +302,7 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
     }
 
     if (shopId === selectedShopId) {
-      return; // Already selected
+      return;
     }
 
     setIsLoading(true);
@@ -357,10 +310,8 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
 
     try {
       await loadTokenFromSource(user.id, shopId);
-      console.log('[AUTH] Switched to shop:', shopId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to switch shop');
-      console.error('[AUTH] Switch shop failed:', err);
     } finally {
       setIsLoading(false);
     }

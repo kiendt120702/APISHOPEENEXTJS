@@ -14,6 +14,20 @@ import { DataTable } from '@/components/ui/data-table';
 interface CampaignData extends CampaignIdItem { name?: string; status?: string; common_info?: CommonInfo; }
 interface BudgetSchedule { id: string; campaign_id: number; campaign_name: string; ad_type: string; hour_start: number; hour_end: number; minute_start?: number; minute_end?: number; budget: number; days_of_week?: number[]; specific_dates?: string[]; is_active?: boolean; created_at?: string; }
 interface BudgetLog { id: string; campaign_id: number; campaign_name?: string; new_budget: number; status: string; error_message?: string; executed_at: string; }
+interface PerformanceData {
+  date?: string;
+  hour?: number;
+  impression: number;
+  clicks: number;
+  ctr: number;
+  expense: number;
+  direct_order: number;
+  direct_gmv: number;
+  broad_order: number;
+  broad_gmv: number;
+  direct_roi?: number;
+  broad_roi?: number;
+}
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   ongoing: { label: 'Đang chạy', color: 'bg-green-100 text-green-700' },
@@ -25,15 +39,28 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 };
 const AD_TYPE_MAP: Record<string, { label: string; color: string }> = { auto: { label: 'Tự động', color: 'bg-purple-100 text-purple-700' }, manual: { label: 'Thủ công', color: 'bg-indigo-100 text-indigo-700' } };
 
-type TabType = 'manage' | 'schedule' | 'saved' | 'history';
+type TabType = 'manage' | 'schedule' | 'saved' | 'history' | 'performance';
 
 export default function AdsPanel() {
   const { toast } = useToast();
   const { token, isAuthenticated } = useShopeeAuth();
   const [loading, setLoading] = useState(false);
+  const [adsBalance, setAdsBalance] = useState<number | null>(null);
   const [campaigns, setCampaigns] = useState<CampaignData[]>([]);
   const [schedules, setSchedules] = useState<BudgetSchedule[]>([]);
   const [logs, setLogs] = useState<BudgetLog[]>([]);
+  const [performance, setPerformance] = useState<PerformanceData[]>([]);
+  const [perfLoading, setPerfLoading] = useState(false);
+  const [perfDateRange, setPerfDateRange] = useState<{ start: string; end: string }>(() => {
+    const today = new Date();
+    const weekAgo = new Date(today);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    return {
+      start: weekAgo.toISOString().split('T')[0],
+      end: today.toISOString().split('T')[0]
+    };
+  });
+  const [perfViewType, setPerfViewType] = useState<'daily' | 'hourly'>('daily');
   const [activeTab, setActiveTab] = useState<TabType>('manage');
   const [scheduleType, setScheduleType] = useState<'daily' | 'specific'>('daily');
   const [showBulkDialog, setShowBulkDialog] = useState(false);
@@ -59,7 +86,21 @@ export default function AdsPanel() {
     return days;
   };
 
-  useEffect(() => { if (isAuthenticated && token?.shop_id) { loadCampaigns(); loadSchedules(); loadLogs(); } }, [isAuthenticated, token?.shop_id]);
+  useEffect(() => { if (isAuthenticated && token?.shop_id) { loadCampaigns(); loadSchedules(); loadLogs(); loadAdsBalance(); } }, [isAuthenticated, token?.shop_id]);
+
+  const loadAdsBalance = async () => {
+    if (!token?.shop_id) return;
+    try {
+      const { data, error } = await supabase.functions.invoke('shopee-ads', {
+        body: { action: 'get-total-balance', shop_id: token.shop_id },
+      });
+      if (!error && data?.response?.total_balance !== undefined) {
+        setAdsBalance(data.response.total_balance);
+      }
+    } catch (e) {
+      console.error('Failed to load ads balance:', e);
+    }
+  };
 
   const loadCampaigns = async () => {
     if (!token?.shop_id) return;
@@ -177,6 +218,41 @@ export default function AdsPanel() {
     if (!shopUuid) return;
     const { data } = await supabase.from('apishopee_ads_budget_logs').select('*').eq('shop_id', shopUuid).order('executed_at', { ascending: false }).limit(50); 
     setLogs(data || []); 
+  };
+
+  const loadPerformance = async () => {
+    if (!token?.shop_id) return;
+    setPerfLoading(true);
+    try {
+      const action = perfViewType === 'daily' ? 'get-daily-performance' : 'get-hourly-performance';
+      const params: Record<string, unknown> = {
+        action,
+        shop_id: token.shop_id,
+      };
+      
+      if (perfViewType === 'daily') {
+        params.start_performance_date = perfDateRange.start;
+        params.end_performance_date = perfDateRange.end;
+      } else {
+        params.performance_date = perfDateRange.end; // Use end date for hourly
+      }
+
+      const { data, error } = await supabase.functions.invoke('shopee-ads', { body: params });
+      
+      if (error) throw error;
+      if (data?.error) {
+        toast({ title: 'Lỗi', description: data.message || data.error, variant: 'destructive' });
+        return;
+      }
+
+      const perfData = data?.response?.data || [];
+      setPerformance(perfData);
+      toast({ title: 'Thành công', description: `Đã tải ${perfData.length} bản ghi hiệu suất` });
+    } catch (e) {
+      toast({ title: 'Lỗi', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setPerfLoading(false);
+    }
   };
 
   // TanStack Table columns for Manage tab
@@ -370,6 +446,86 @@ export default function AdsPanel() {
     },
   ], []);
 
+  // TanStack Table columns for Performance tab
+  const performanceColumns: ColumnDef<PerformanceData>[] = useMemo(() => [
+    {
+      accessorKey: perfViewType === 'daily' ? 'date' : 'hour',
+      header: perfViewType === 'daily' ? 'Ngày' : 'Giờ',
+      size: 100,
+      cell: ({ row }) => (
+        <span className="text-sm font-medium text-slate-700">
+          {perfViewType === 'daily' 
+            ? row.original.date 
+            : `${row.original.hour?.toString().padStart(2, '0')}:00`}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'impression',
+      header: 'Lượt hiển thị',
+      size: 100,
+      cell: ({ row }) => (
+        <span className="text-sm text-slate-600">{new Intl.NumberFormat('vi-VN').format(row.original.impression)}</span>
+      ),
+    },
+    {
+      accessorKey: 'clicks',
+      header: 'Lượt click',
+      size: 90,
+      cell: ({ row }) => (
+        <span className="text-sm text-slate-600">{new Intl.NumberFormat('vi-VN').format(row.original.clicks)}</span>
+      ),
+    },
+    {
+      accessorKey: 'ctr',
+      header: 'CTR',
+      size: 70,
+      cell: ({ row }) => (
+        <span className="text-sm text-blue-600 font-medium">{(row.original.ctr * 100).toFixed(2)}%</span>
+      ),
+    },
+    {
+      accessorKey: 'expense',
+      header: 'Chi phí',
+      size: 110,
+      cell: ({ row }) => (
+        <span className="text-sm font-semibold text-red-500">{formatPrice(row.original.expense)}</span>
+      ),
+    },
+    {
+      accessorKey: 'direct_order',
+      header: 'Đơn trực tiếp',
+      size: 100,
+      cell: ({ row }) => (
+        <span className="text-sm text-green-600 font-medium">{row.original.direct_order}</span>
+      ),
+    },
+    {
+      accessorKey: 'direct_gmv',
+      header: 'GMV trực tiếp',
+      size: 120,
+      cell: ({ row }) => (
+        <span className="text-sm font-semibold text-green-600">{formatPrice(row.original.direct_gmv)}</span>
+      ),
+    },
+    {
+      accessorKey: 'broad_order',
+      header: 'Đơn gián tiếp',
+      size: 100,
+      cell: ({ row }) => (
+        <span className="text-sm text-purple-600">{row.original.broad_order}</span>
+      ),
+    },
+    {
+      accessorKey: 'broad_gmv',
+      header: 'GMV gián tiếp',
+      size: 120,
+      cell: ({ row }) => (
+        <span className="text-sm font-semibold text-purple-600">{formatPrice(row.original.broad_gmv)}</span>
+      ),
+    },
+  ], [perfViewType]);
+
   const hasScheduleAtSlot = (cid: number, h: number, m: number) => {
     const slotMinutes = h * 60 + m;
     return schedules.some(s => {
@@ -500,6 +656,12 @@ export default function AdsPanel() {
             return <button key={key} onClick={() => setStatusFilter(key)} className={cn("px-2.5 py-1 rounded-full text-xs font-medium transition-colors", isActive ? colors[key]?.active : colors[key]?.inactive)}>{label} ({count})</button>;
           })}
           <div className="flex-1" />
+          {adsBalance !== null && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-green-50 border border-green-200 rounded-lg mr-2">
+              <span className="text-xs text-green-600">Số dư:</span>
+              <span className="text-sm font-bold text-green-700">{formatPrice(adsBalance)}</span>
+            </div>
+          )}
           <Button variant="outline" size="sm" onClick={fetchFromAPI} disabled={loading}>{loading ? 'Đang tải...' : 'Đồng bộ'}</Button>
         </div>
         <div className="flex border-b px-4">
@@ -507,6 +669,7 @@ export default function AdsPanel() {
           <button onClick={() => setActiveTab('schedule')} className={cn("px-4 py-2.5 text-sm font-medium border-b-2 -mb-px", activeTab === 'schedule' ? "border-orange-500 text-orange-600" : "border-transparent text-gray-500")}>Lịch ngân sách</button>
           <button onClick={() => setActiveTab('saved')} className={cn("px-4 py-2.5 text-sm font-medium border-b-2 -mb-px", activeTab === 'saved' ? "border-orange-500 text-orange-600" : "border-transparent text-gray-500")}>Đã lưu ({schedules.length})</button>
           <button onClick={() => setActiveTab('history')} className={cn("px-4 py-2.5 text-sm font-medium border-b-2 -mb-px", activeTab === 'history' ? "border-orange-500 text-orange-600" : "border-transparent text-gray-500")}>Lịch sử</button>
+          <button onClick={() => setActiveTab('performance')} className={cn("px-4 py-2.5 text-sm font-medium border-b-2 -mb-px", activeTab === 'performance' ? "border-orange-500 text-orange-600" : "border-transparent text-gray-500")}>📊 Hiệu suất</button>
         </div>
       </div>
       <div className="flex-1 overflow-auto">
@@ -655,6 +818,93 @@ export default function AdsPanel() {
                 columns={logColumns}
                 data={logs}
                 emptyMessage="Chưa có lịch sử"
+                pageSize={20}
+              />
+            </div>
+          </div>
+        )}
+        {activeTab === 'performance' && (
+          <div className="p-4 space-y-4">
+            {/* Controls */}
+            <div className="bg-white rounded-lg border p-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-600">Xem theo:</span>
+                  <button 
+                    onClick={() => setPerfViewType('daily')} 
+                    className={cn("px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", perfViewType === 'daily' ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}
+                  >
+                    Theo ngày
+                  </button>
+                  <button 
+                    onClick={() => setPerfViewType('hourly')} 
+                    className={cn("px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", perfViewType === 'hourly' ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}
+                  >
+                    Theo giờ
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  {perfViewType === 'daily' ? (
+                    <>
+                      <Input 
+                        type="date" 
+                        value={perfDateRange.start} 
+                        onChange={(e) => setPerfDateRange(prev => ({ ...prev, start: e.target.value }))}
+                        className="w-36"
+                      />
+                      <span className="text-gray-400">→</span>
+                      <Input 
+                        type="date" 
+                        value={perfDateRange.end} 
+                        onChange={(e) => setPerfDateRange(prev => ({ ...prev, end: e.target.value }))}
+                        className="w-36"
+                      />
+                    </>
+                  ) : (
+                    <Input 
+                      type="date" 
+                      value={perfDateRange.end} 
+                      onChange={(e) => setPerfDateRange(prev => ({ ...prev, end: e.target.value }))}
+                      className="w-36"
+                    />
+                  )}
+                </div>
+                <Button onClick={loadPerformance} disabled={perfLoading} className="bg-orange-500 hover:bg-orange-600">
+                  {perfLoading ? 'Đang tải...' : 'Tải dữ liệu'}
+                </Button>
+              </div>
+            </div>
+
+            {/* Summary Cards */}
+            {performance.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white rounded-lg border p-4">
+                  <p className="text-xs text-gray-500 mb-1">Tổng chi phí</p>
+                  <p className="text-lg font-bold text-red-500">{formatPrice(performance.reduce((sum, p) => sum + p.expense, 0))}</p>
+                </div>
+                <div className="bg-white rounded-lg border p-4">
+                  <p className="text-xs text-gray-500 mb-1">Tổng đơn hàng</p>
+                  <p className="text-lg font-bold text-green-600">{performance.reduce((sum, p) => sum + p.direct_order + p.broad_order, 0)}</p>
+                </div>
+                <div className="bg-white rounded-lg border p-4">
+                  <p className="text-xs text-gray-500 mb-1">Tổng GMV</p>
+                  <p className="text-lg font-bold text-green-600">{formatPrice(performance.reduce((sum, p) => sum + p.direct_gmv + p.broad_gmv, 0))}</p>
+                </div>
+                <div className="bg-white rounded-lg border p-4">
+                  <p className="text-xs text-gray-500 mb-1">Tổng clicks</p>
+                  <p className="text-lg font-bold text-blue-600">{new Intl.NumberFormat('vi-VN').format(performance.reduce((sum, p) => sum + p.clicks, 0))}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Data Table */}
+            <div className="bg-white rounded-lg border overflow-hidden">
+              <DataTable
+                columns={performanceColumns}
+                data={performance}
+                loading={perfLoading}
+                loadingMessage="Đang tải dữ liệu hiệu suất..."
+                emptyMessage="Chưa có dữ liệu. Chọn khoảng thời gian và nhấn Tải dữ liệu"
                 pageSize={20}
               />
             </div>
