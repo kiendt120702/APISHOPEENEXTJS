@@ -6,10 +6,19 @@ import { Toaster as Sonner } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { AuthProvider } from '@/contexts/AuthContext';
 
+// Layout
+import MainLayout from '@/components/layout/MainLayout';
+
 // Pages
 import AuthPage from '@/pages/AuthPage';
 import AuthCallback from '@/pages/AuthCallback';
+import DashboardPage from '@/pages/DashboardPage';
 import ProfileShopsPage from '@/pages/ProfileShopsPage';
+import FlashSalePage from '@/pages/FlashSalePage';
+import AdsPage from '@/pages/AdsPage';
+import ProductsPage from '@/pages/ProductsPage';
+import OrdersPage from '@/pages/OrdersPage';
+import SettingsPage from '@/pages/SettingsPage';
 import NotFoundPage from '@/pages/NotFoundPage';
 
 function App() {
@@ -36,9 +45,17 @@ function App() {
               <Route path="/auth" element={<AuthPage />} />
               <Route path="/auth/callback" element={<AuthCallback />} />
 
-              {/* Protected route - Shop Management */}
-              <Route path="/" element={<Navigate to="/shops" replace />} />
-              <Route path="/shops" element={<ProfileShopsPage />} />
+              {/* Protected routes with MainLayout */}
+              <Route element={<MainLayout />}>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/shops" element={<ProfileShopsPage />} />
+                <Route path="/flash-sale" element={<FlashSalePage />} />
+                <Route path="/ads" element={<AdsPage />} />
+                <Route path="/products" element={<ProductsPage />} />
+                <Route path="/orders" element={<OrdersPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+              </Route>
 
               {/* 404 */}
               <Route path="*" element={<NotFoundPage />} />
