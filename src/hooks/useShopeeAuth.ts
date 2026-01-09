@@ -241,16 +241,23 @@ export function useShopeeAuth(): UseShopeeAuthReturn {
 
             console.log('[AUTH] Shop and token saved to database');
 
+            // Wait for shop info to be fetched - this is important for UI display
             try {
-              await supabase.functions.invoke('apishopee-shop', {
+              const { data, error } = await supabase.functions.invoke('apishopee-shop', {
                 body: { action: 'get-full-info', shop_id: newToken.shop_id, force_refresh: true },
               });
-            } catch {
-              // ignore sync error
+              
+              if (error) {
+                console.warn('[AUTH] Failed to fetch shop info:', error);
+              } else {
+                console.log('[AUTH] Shop info fetched successfully:', data?.shop_name);
+              }
+            } catch (err) {
+              console.warn('[AUTH] Error fetching shop info:', err);
             }
           }
-        } catch {
-          // ignore db save error
+        } catch (err) {
+          console.warn('[AUTH] Error saving shop to database:', err);
         }
 
         sessionStorage.removeItem('shopee_partner_info');

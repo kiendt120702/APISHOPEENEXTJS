@@ -100,6 +100,7 @@ export function ShopManagementPanel() {
         });
 
       setShops(shopsWithRole);
+      console.log('[SHOPS] Loaded', shopsWithRole.length, 'shops');
       setLoading(false); // Set loading false ngay sau khi có data
     } catch (err) {
       console.error('Error loading shops:', err);
@@ -121,6 +122,19 @@ export function ShopManagementPanel() {
       setLoading(false);
     }
   }, [user?.id, isAuthLoading]);
+
+  // Force reload shops when component mounts or becomes visible
+  // This ensures shops are loaded after OAuth callback redirect
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && user?.id && !loading) {
+        loadShops();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [user?.id, loading]);
 
   // Tự động fetch expire_time cho các shop chưa có giá trị này
   // expire_time được trả về từ Shopee API get_shop_info, không phải từ token API
