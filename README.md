@@ -43,17 +43,14 @@ Truy cập http://localhost:5173
 .
 ├── src/
 │   ├── pages/              # Các trang chính
-│   │   ├── DashboardPage.tsx
-│   │   ├── FlashSalePage.tsx
-│   │   ├── AdsPage.tsx
-│   │   ├── KeywordTrackingPage.tsx
-│   │   ├── AccountHealthPage.tsx
-│   │   └── ProfilePage.tsx
-│   ├── layouts/            # Layout components
-│   │   └── DashboardLayout.tsx
+│   │   ├── AuthPage.tsx
+│   │   ├── AuthCallback.tsx
+│   │   ├── ProfileShopsPage.tsx
+│   │   └── NotFoundPage.tsx
 │   ├── components/         # UI Components
 │   │   ├── ui/            # Shadcn UI components
-│   │   ├── panels/        # Dashboard panels
+│   │   ├── auth/          # Auth components
+│   │   ├── shop/          # Shop components
 │   │   └── profile/       # Profile components
 │   ├── contexts/          # React contexts
 │   │   └── AuthContext.tsx
@@ -75,7 +72,7 @@ Truy cập http://localhost:5173
 
 ## 🔧 Tech Stack
 
-- **React 18** - UI framework
+- **React 19** - UI framework
 - **Vite** - Build tool
 - **TypeScript** - Type safety
 - **React Router** - Client-side routing
@@ -86,11 +83,9 @@ Truy cập http://localhost:5173
 
 ## 📝 Features
 
-- ✅ Quản lý Flash Sale
-- ✅ Quản lý quảng cáo Shopee
-- ✅ Theo dõi từ khóa & volume
-- ✅ Sức khỏe tài khoản Shop
-- ✅ Quản lý profile & shops
+- ✅ Xác thực người dùng (Authentication)
+- ✅ Kết nối Shop Shopee với OAuth
+- ✅ Quản lý danh sách Shop
 - ✅ Auto refresh Shopee token
 
 ## 🛠 Commands

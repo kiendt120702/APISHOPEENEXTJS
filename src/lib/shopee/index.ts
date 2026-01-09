@@ -39,82 +39,12 @@ export {
 } from './storage';
 export type { TokenStorage } from './storage';
 
-// Ads Client
-export {
-  getCampaignIdList,
-  getCampaignSettingInfo,
-  getAllCampaignsWithInfo,
-  editManualProductAds,
-  editAutoProductAds,
-  editCampaignBudget,
-  editCampaignStatus,
-  // Cache functions
-  getCampaignsFromCache,
-  saveCampaignsToCache,
-  isCacheStale,
-} from './ads-client';
-export type {
-  GetCampaignIdListParams,
-  GetCampaignSettingInfoParams,
-  EditCampaignBudgetParams,
-  EditCampaignStatusParams,
-  CachedCampaign,
-} from './ads-client';
-
-// Ads Budget Scheduler Client
-export {
-  createBudgetSchedule,
-  updateBudgetSchedule,
-  deleteBudgetSchedule,
-  listBudgetSchedules,
-  getBudgetLogs,
-  runScheduleNow,
-  formatHourRange,
-  formatDaysOfWeek,
-} from './ads-scheduler-client';
-export type {
-  ScheduledAdsBudget,
-  AdsBudgetLog,
-  CreateScheduleParams,
-  UpdateScheduleParams,
-} from './ads-scheduler-client';
-
-// Flash Sale Client
-export {
-  getFlashSalesFromCache,
-  saveFlashSalesToCache,
-  isCacheStale as isFlashSaleCacheStale,
-} from './flash-sale-client';
-export type {
-  FlashSale,
-  CachedFlashSale,
-} from './flash-sale-client';
+// Ads Client - Removed (not used)
+// Flash Sale Client - Removed (not used)
+// Ads Budget Scheduler Client - Removed (not used)
 
 // Types
 export type {
   AccessToken,
   RefreshedAccessToken,
-  // Ads Types
-  AdType,
-  CampaignStatus,
-  BiddingMethod,
-  CampaignPlacement,
-  CampaignIdItem,
-  GetCampaignIdListResponse,
-  CampaignDuration,
-  CommonInfo,
-  SelectedKeyword,
-  DiscoveryAdsLocation,
-  ManualBiddingInfo,
-  AutoBiddingInfo,
-  AutoProductAdsInfo,
-  CampaignSettingInfo,
-  GetCampaignSettingInfoResponse,
-  // Edit Ads Types
-  EditAction,
-  SmartCreativeSetting,
-  EditManualProductAdsParams,
-  EditAutoProductAdsParams,
-  EditAdsResponse,
 } from './types';
-export { CampaignInfoType } from './types';

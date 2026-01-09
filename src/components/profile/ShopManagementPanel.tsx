@@ -100,6 +100,7 @@ export function ShopManagementPanel() {
         });
 
       setShops(shopsWithRole);
+      setLoading(false); // Set loading false ngay sau khi có data
     } catch (err) {
       console.error('Error loading shops:', err);
       toast({
@@ -107,7 +108,6 @@ export function ShopManagementPanel() {
         description: 'Không thể tải danh sách shop',
         variant: 'destructive',
       });
-    } finally {
       setLoading(false);
     }
   };
@@ -480,9 +480,33 @@ export function ShopManagementPanel() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Spinner size="lg" text="Đang tải..." />
-      </div>
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="flex items-center justify-between">
+            <span>Shop có quyền truy cập</span>
+            <Button className="bg-orange-500 hover:bg-orange-600" disabled>
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Kết nối Shop
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-4 p-4 border border-slate-200 rounded-lg animate-pulse">
+                <div className="w-12 h-12 bg-slate-200 rounded-lg" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 bg-slate-200 rounded w-1/3" />
+                  <div className="h-3 bg-slate-200 rounded w-1/4" />
+                </div>
+                <div className="h-8 w-24 bg-slate-200 rounded" />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
