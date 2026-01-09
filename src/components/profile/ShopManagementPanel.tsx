@@ -64,8 +64,12 @@ export function ShopManagementPanel() {
   const [connecting, setConnecting] = useState(false);
 
   const loadShops = async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      console.log('[SHOPS] No user ID, skipping load');
+      return;
+    }
 
+    console.log('[SHOPS] Loading shops for user:', user.id);
     setLoading(true);
     try {
       // Query shop_members với role info và join luôn shops data
@@ -80,9 +84,15 @@ export function ShopManagementPanel() {
         .eq('profile_id', user.id)
         .eq('is_active', true);
 
-      if (memberError) throw memberError;
+      if (memberError) {
+        console.error('[SHOPS] Error loading shops:', memberError);
+        throw memberError;
+      }
+
+      console.log('[SHOPS] Raw member data:', memberData);
 
       if (!memberData || memberData.length === 0) {
+        console.log('[SHOPS] No shops found for user');
         setShops([]);
         setLoading(false);
         return;
@@ -99,11 +109,11 @@ export function ShopManagementPanel() {
           };
         });
 
+      console.log('[SHOPS] Loaded', shopsWithRole.length, 'shops:', shopsWithRole.map(s => ({ id: s.shop_id, name: s.shop_name })));
       setShops(shopsWithRole);
-      console.log('[SHOPS] Loaded', shopsWithRole.length, 'shops');
       setLoading(false); // Set loading false ngay sau khi có data
     } catch (err) {
-      console.error('Error loading shops:', err);
+      console.error('[SHOPS] Error loading shops:', err);
       toast({
         title: 'Lỗi',
         description: 'Không thể tải danh sách shop',

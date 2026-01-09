@@ -89,6 +89,7 @@ export async function saveUserShop(
     shopInternalId = newShop.id;
   }
 
+  // Always create/update shop_member for the user (regardless of whether shop existed)
   const { data: adminRole, error: roleError } = await supabase
     .from('apishopee_roles')
     .select('id')
@@ -104,6 +105,8 @@ export async function saveUserShop(
     is_active: true,
   };
 
+  console.log('[AUTH] Creating/updating shop_member:', memberData);
+
   const { error: memberError } = await supabase
     .from('apishopee_shop_members')
     .upsert(memberData, {
@@ -111,7 +114,12 @@ export async function saveUserShop(
     })
     .single();
 
-  if (memberError) throw memberError;
+  if (memberError) {
+    console.error('[AUTH] Error creating shop_member:', memberError);
+    throw memberError;
+  }
+
+  console.log('[AUTH] Shop member created/updated successfully');
 }
 
 export async function getUserShops(userId: string) {
