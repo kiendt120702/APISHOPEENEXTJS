@@ -7,6 +7,7 @@ import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/hooks/use-toast';
 import { useShopeeAuth } from '@/hooks/useShopeeAuth';
+import { useAuth } from '@/hooks/useAuth';
 import { clearToken } from '@/lib/shopee';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,6 +15,8 @@ import { Spinner } from '@/components/ui/spinner';
 import { SimpleDataTable, CellShopInfo, CellBadge, CellText, CellActions } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
   DialogContent,
@@ -22,6 +25,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Users, Trash2 } from 'lucide-react';
+
+// Admin email - chỉ tài khoản này mới được thêm shop và phân quyền
+const ADMIN_EMAIL = 'betacom.work@gmail.com';
 
 interface Shop {
   id: string; // UUID - internal ID
@@ -42,17 +56,42 @@ interface Shop {
 
 interface ShopWithRole extends Shop {
   role: string;
+  memberCount?: number;
+}
+
+interface Profile {
+  id: string;
+  email: string;
+  full_name: string | null;
+}
+
+interface Role {
+  id: string;
+  name: string;
+  display_name: string;
+}
+
+interface ShopMember {
+  id: string;
+  profile_id: string;
+  role_id: string;
+  profile: Profile;
+  role: Role;
 }
 
 export function ShopManagementPanel() {
   const { toast } = useToast();
   const { user, login, isLoading: isAuthLoading } = useShopeeAuth();
+  const { user: authUser } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [shops, setShops] = useState<ShopWithRole[]>([]);
   const [refreshingShop, setRefreshingShop] = useState<number | null>(null);
   const [reconnectingShop, setReconnectingShop] = useState<number | null>(null);
   const hasLoadedRef = useRef(false);
+
+  // Kiểm tra user hiện tại có phải admin không
+  const isSystemAdmin = authUser?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
   // Delete dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -65,6 +104,19 @@ export function ShopManagementPanel() {
   const [partnerKeyInput, setPartnerKeyInput] = useState('');
   const [partnerNameInput, setPartnerNameInput] = useState('');
   const [connecting, setConnecting] = useState(false);
+
+  // Members dialog - phân quyền shop
+  const [membersDialogOpen, setMembersDialogOpen] = useState(false);
+  const [selectedShopForMembers, setSelectedShopForMembers] = useState<ShopWithRole | null>(null);
+  const [shopMembers, setShopMembers] = useState<ShopMember[]>([]);
+  const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
+  const [allRoles, setAllRoles] = useState<Role[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [selectedProfileIds, setSelectedProfileIds] = useState<string[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string>('');
+  const [addingMembers, setAddingMembers] = useState(false);
+  const [deletingMemberId, setDeletingMemberId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const loadShops = useCallback(async () => {
     if (!user?.id) {
@@ -378,6 +430,179 @@ export function ShopManagementPanel() {
     }
   };
 
+  // Load members của shop
+  const handleOpenMembersDialog = async (shop: ShopWithRole) => {
+    setSelectedShopForMembers(shop);
+    setMembersDialogOpen(true);
+    setLoadingMembers(true);
+    setSelectedProfileIds([]);
+    setSelectedRoleId('');
+    setSearchQuery('');
+
+    try {
+      // Load members, profiles, roles in parallel
+      const [membersRes, profilesRes, rolesRes] = await Promise.all([
+        supabase
+          .from('apishopee_shop_members')
+          .select(`
+            id, profile_id, role_id,
+            sys_profiles(id, email, full_name),
+            apishopee_roles(id, name, display_name)
+          `)
+          .eq('shop_id', shop.id)
+          .eq('is_active', true),
+        supabase.from('sys_profiles').select('id, email, full_name').order('full_name'),
+        supabase.from('apishopee_roles').select('id, name, display_name').order('name'),
+      ]);
+
+      if (membersRes.error) throw membersRes.error;
+      if (profilesRes.error) throw profilesRes.error;
+      if (rolesRes.error) throw rolesRes.error;
+
+      const members: ShopMember[] = (membersRes.data || []).map((m) => ({
+        id: m.id,
+        profile_id: m.profile_id,
+        role_id: m.role_id,
+        profile: m.sys_profiles as unknown as Profile,
+        role: m.apishopee_roles as unknown as Role,
+      }));
+
+      setShopMembers(members);
+      setAllProfiles(profilesRes.data || []);
+      setAllRoles(rolesRes.data || []);
+
+      // Set default role to 'member'
+      const memberRole = (rolesRes.data || []).find(r => r.name === 'member');
+      if (memberRole) setSelectedRoleId(memberRole.id);
+    } catch (err) {
+      console.error('Error loading members:', err);
+      toast({
+        title: 'Lỗi',
+        description: 'Không thể tải danh sách thành viên',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingMembers(false);
+    }
+  };
+
+  // Thêm nhiều members
+  const handleAddMembers = async () => {
+    if (!selectedShopForMembers || selectedProfileIds.length === 0 || !selectedRoleId) {
+      toast({
+        title: 'Lỗi',
+        description: 'Vui lòng chọn ít nhất một nhân viên và vai trò',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Filter out profiles that are already members
+    const existingProfileIds = shopMembers.map(m => m.profile_id);
+    const newProfileIds = selectedProfileIds.filter(id => !existingProfileIds.includes(id));
+
+    if (newProfileIds.length === 0) {
+      toast({
+        title: 'Thông báo',
+        description: 'Tất cả nhân viên đã chọn đều đã có quyền truy cập shop này',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setAddingMembers(true);
+    try {
+      const insertData = newProfileIds.map(profileId => ({
+        shop_id: selectedShopForMembers.id,
+        profile_id: profileId,
+        role_id: selectedRoleId,
+        is_active: true,
+      }));
+
+      const { data, error } = await supabase
+        .from('apishopee_shop_members')
+        .insert(insertData)
+        .select(`
+          id, profile_id, role_id,
+          sys_profiles(id, email, full_name),
+          apishopee_roles(id, name, display_name)
+        `);
+
+      if (error) throw error;
+
+      const newMembers: ShopMember[] = (data || []).map((m) => ({
+        id: m.id,
+        profile_id: m.profile_id,
+        role_id: m.role_id,
+        profile: m.sys_profiles as unknown as Profile,
+        role: m.apishopee_roles as unknown as Role,
+      }));
+
+      setShopMembers(prev => [...prev, ...newMembers]);
+      setSelectedProfileIds([]);
+
+      toast({
+        title: 'Thành công',
+        description: `Đã thêm ${newMembers.length} thành viên`,
+      });
+    } catch (err) {
+      console.error('Error adding members:', err);
+      toast({
+        title: 'Lỗi',
+        description: (err as Error).message,
+        variant: 'destructive',
+      });
+    } finally {
+      setAddingMembers(false);
+    }
+  };
+
+  // Xóa member
+  const handleDeleteMember = async (memberId: string) => {
+    setDeletingMemberId(memberId);
+    try {
+      const { error } = await supabase
+        .from('apishopee_shop_members')
+        .delete()
+        .eq('id', memberId);
+
+      if (error) throw error;
+
+      setShopMembers(prev => prev.filter(m => m.id !== memberId));
+      toast({ title: 'Thành công', description: 'Đã xóa quyền truy cập' });
+    } catch (err) {
+      console.error('Error deleting member:', err);
+      toast({
+        title: 'Lỗi',
+        description: (err as Error).message,
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingMemberId(null);
+    }
+  };
+
+  // Toggle chọn profile
+  const toggleProfileSelection = (profileId: string) => {
+    setSelectedProfileIds(prev =>
+      prev.includes(profileId)
+        ? prev.filter(id => id !== profileId)
+        : [...prev, profileId]
+    );
+  };
+
+  // Filter profiles chưa là member và theo search query
+  const availableProfiles = allProfiles.filter(p => {
+    const isMember = shopMembers.some(m => m.profile_id === p.id);
+    if (isMember) return false;
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      p.email.toLowerCase().includes(query) ||
+      (p.full_name?.toLowerCase().includes(query) ?? false)
+    );
+  });
+
   /**
    * Tính thời gian hết hạn ủy quyền (authorization expiry)
    * Sử dụng expire_time từ Shopee API (timestamp giây)
@@ -490,36 +715,58 @@ export function ShopManagementPanel() {
       header: 'Thao tác',
       render: (shop: ShopWithRole) => (
         <CellActions>
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-slate-600 hover:text-slate-800"
-            onClick={(e) => { e.stopPropagation(); handleReconnectShop(shop); }}
-            disabled={reconnectingShop === shop.shop_id}
-          >
-            {reconnectingShop === shop.shop_id ? (
-              <Spinner size="sm" />
-            ) : (
-              <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          {/* Chỉ admin mới được phân quyền */}
+          {isSystemAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 h-7 text-xs px-2"
+              onClick={(e) => { e.stopPropagation(); handleOpenMembersDialog(shop); }}
+            >
+              <Users className="w-3.5 h-3.5 mr-1" />
+              Phân quyền
+            </Button>
+          )}
+          {/* Chỉ admin mới được kết nối lại shop */}
+          {isSystemAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-slate-600 hover:text-slate-800 h-7 text-xs px-2"
+              onClick={(e) => { e.stopPropagation(); handleReconnectShop(shop); }}
+              disabled={reconnectingShop === shop.shop_id}
+            >
+              {reconnectingShop === shop.shop_id ? (
+                <Spinner size="sm" />
+              ) : (
+                <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              )}
+              Kết nối lại
+            </Button>
+          )}
+          {/* Chỉ admin mới được xóa shop */}
+          {isSystemAdmin && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-red-500 hover:text-red-600 hover:bg-red-50 h-7 w-7 p-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShopToDelete(shop);
+                setDeleteDialogOpen(true);
+              }}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
-            )}
-            Kết nối lại
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-red-500 hover:text-red-600 hover:bg-red-50 px-2"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShopToDelete(shop);
-              setDeleteDialogOpen(true);
-            }}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-          </Button>
+            </Button>
+          )}
+          {/* User thường chỉ xem, không có action */}
+          {!isSystemAdmin && (
+            <span className="text-slate-400 text-sm">-</span>
+          )}
         </CellActions>
       ),
     },
@@ -531,12 +778,14 @@ export function ShopManagementPanel() {
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center justify-between">
             <span>Shop có quyền truy cập</span>
-            <Button className="bg-orange-500 hover:bg-orange-600" disabled>
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Kết nối Shop
-            </Button>
+            {isSystemAdmin && (
+              <Button className="bg-orange-500 hover:bg-orange-600" disabled>
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Kết nối Shop
+              </Button>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -563,15 +812,17 @@ export function ShopManagementPanel() {
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center justify-between">
             <span>Shop có quyền truy cập ({shops.length})</span>
-            <Button
-              className="bg-orange-500 hover:bg-orange-600"
-              onClick={handleConnectNewShop}
-            >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Kết nối Shop
-            </Button>
+            {isSystemAdmin && (
+              <Button
+                className="bg-orange-500 hover:bg-orange-600"
+                onClick={handleConnectNewShop}
+              >
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Kết nối Shop
+              </Button>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -673,6 +924,159 @@ export function ShopManagementPanel() {
               ) : (
                 'Kết nối với Shopee'
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Members Dialog - Phân quyền shop */}
+      <Dialog open={membersDialogOpen} onOpenChange={setMembersDialogOpen}>
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5" />
+              Phân quyền Shop
+            </DialogTitle>
+            <DialogDescription>
+              {selectedShopForMembers?.shop_name || `Shop ${selectedShopForMembers?.shop_id}`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {loadingMembers ? (
+            <div className="flex items-center justify-center py-8">
+              <Spinner size="lg" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Danh sách thành viên hiện tại */}
+              <div>
+                <Label className="text-sm font-medium">Thành viên hiện tại ({shopMembers.length})</Label>
+                <ScrollArea className="h-[150px] mt-2 border rounded-lg">
+                  {shopMembers.length === 0 ? (
+                    <p className="text-sm text-slate-400 p-4 text-center">Chưa có thành viên nào</p>
+                  ) : (
+                    <div className="p-2 space-y-1">
+                      {shopMembers.map((member) => (
+                        <div
+                          key={member.id}
+                          className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-800 truncate">
+                              {member.profile?.full_name || member.profile?.email}
+                            </p>
+                            <p className="text-xs text-slate-400 truncate">{member.profile?.email}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              member.role?.name === 'admin' 
+                                ? 'bg-green-100 text-green-700' 
+                                : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {member.role?.display_name}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                              onClick={() => handleDeleteMember(member.id)}
+                              disabled={deletingMemberId === member.id}
+                            >
+                              {deletingMemberId === member.id ? (
+                                <Spinner size="sm" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </div>
+
+              {/* Thêm thành viên mới */}
+              <div className="border-t pt-4">
+                <Label className="text-sm font-medium">Thêm thành viên mới</Label>
+                
+                <div className="mt-2 space-y-3">
+                  {/* Search */}
+                  <Input
+                    placeholder="Tìm kiếm nhân viên..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+
+                  {/* Danh sách nhân viên có thể thêm */}
+                  <ScrollArea className="h-[180px] border rounded-lg">
+                    {availableProfiles.length === 0 ? (
+                      <p className="text-sm text-slate-400 p-4 text-center">
+                        {searchQuery ? 'Không tìm thấy nhân viên' : 'Tất cả nhân viên đã có quyền truy cập'}
+                      </p>
+                    ) : (
+                      <div className="p-2 space-y-1">
+                        {availableProfiles.map((profile) => (
+                          <label
+                            key={profile.id}
+                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                          >
+                            <Checkbox
+                              checked={selectedProfileIds.includes(profile.id)}
+                              onCheckedChange={() => toggleProfileSelection(profile.id)}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-slate-800 truncate">
+                                {profile.full_name || profile.email}
+                              </p>
+                              {profile.full_name && (
+                                <p className="text-xs text-slate-400 truncate">{profile.email}</p>
+                              )}
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+
+                  {/* Chọn vai trò */}
+                  <div className="flex items-center gap-3">
+                    <Select value={selectedRoleId} onValueChange={setSelectedRoleId}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Chọn vai trò" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {allRoles.map((role) => (
+                          <SelectItem key={role.id} value={role.id}>
+                            {role.display_name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <Button
+                      className="bg-orange-500 hover:bg-orange-600"
+                      onClick={handleAddMembers}
+                      disabled={addingMembers || selectedProfileIds.length === 0 || !selectedRoleId}
+                    >
+                      {addingMembers ? (
+                        <>
+                          <Spinner size="sm" className="mr-2" />
+                          Đang thêm...
+                        </>
+                      ) : (
+                        <>Thêm {selectedProfileIds.length > 0 ? `(${selectedProfileIds.length})` : ''}</>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMembersDialogOpen(false)}>
+              Đóng
             </Button>
           </DialogFooter>
         </DialogContent>

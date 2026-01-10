@@ -6,6 +6,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useShopeeAuth } from '@/hooks/useShopeeAuth';
 import { useAuth } from '@/hooks/useAuth';
+import { toast } from '@/hooks/use-toast';
 
 export default function AuthCallback() {
   const navigate = useNavigate();
@@ -29,18 +30,36 @@ export default function AuthCallback() {
       const errorParam = searchParams.get('error');
 
       if (errorParam) {
-        setError(`Shopee authorization failed: ${errorParam}`);
+        const errorMsg = `Shopee authorization failed: ${errorParam}`;
+        setError(errorMsg);
+        toast({
+          title: "Kết nối thất bại",
+          description: errorMsg,
+          variant: "destructive",
+        });
         return;
       }
 
       if (!code) {
-        setError('Missing authorization code');
+        const errorMsg = 'Missing authorization code';
+        setError(errorMsg);
+        toast({
+          title: "Kết nối thất bại",
+          description: "Thiếu mã xác thực từ Shopee",
+          variant: "destructive",
+        });
         return;
       }
 
       // Kiểm tra user đã đăng nhập chưa
       if (!isAuthenticated) {
-        setError('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        const errorMsg = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+        setError(errorMsg);
+        toast({
+          title: "Phiên đăng nhập hết hạn",
+          description: "Vui lòng đăng nhập lại để tiếp tục",
+          variant: "destructive",
+        });
         return;
       }
 
@@ -49,12 +68,27 @@ export default function AuthCallback() {
 
       try {
         await handleCallback(code, shopId ? Number(shopId) : undefined);
+        
+        // Hiển thị toast thành công
+        toast({
+          title: "Kết nối thành công! 🎉",
+          description: "Shop Shopee đã được liên kết với tài khoản của bạn.",
+        });
+        
         // Dùng navigate với state để báo cho ShopsSettingsPage reload data
         // Thêm ?refresh param để trigger reload trong ShopManagementPanel
         navigate('/settings/shops?refresh=' + Date.now(), { replace: true });
       } catch (err) {
         processedRef.current = false;
-        setError(err instanceof Error ? err.message : 'Authentication failed');
+        const errorMessage = err instanceof Error ? err.message : 'Authentication failed';
+        setError(errorMessage);
+        
+        // Hiển thị toast thất bại
+        toast({
+          title: "Kết nối thất bại",
+          description: errorMessage,
+          variant: "destructive",
+        });
       } finally {
         setIsProcessing(false);
       }
