@@ -66,6 +66,17 @@ function formatDateTime(timestamp: number): string {
   });
 }
 
+// Format ISO string to readable date/time (dd/MM/yyyy HH:mm)
+function formatISODateTime(isoString: string): string {
+  const date = new Date(isoString);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
 // Check if flash sale can be deleted (only upcoming)
 function canDelete(sale: FlashSale): boolean {
   return sale.type === 1;
@@ -106,6 +117,49 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
   });
 
   const { data: flashSales, loading, error, refetch, dataUpdatedAt } = useFlashSaleData(shopId, userId);
+
+  // Lấy thời gian sync gần nhất từ database (từ cron job)
+  const [lastCronSyncAt, setLastCronSyncAt] = useState<string | null>(null);
+  
+  useEffect(() => {
+    const fetchSyncStatus = async () => {
+      const { data } = await supabase
+        .from('apishopee_sync_status')
+        .select('flash_sales_synced_at')
+        .eq('shop_id', shopId)
+        .single();
+      
+      if (data?.flash_sales_synced_at) {
+        setLastCronSyncAt(data.flash_sales_synced_at);
+      }
+    };
+    
+    fetchSyncStatus();
+    
+    // Subscribe to realtime updates
+    const channel = supabase
+      .channel('sync-status-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'apishopee_sync_status',
+          filter: `shop_id=eq.${shopId}`,
+        },
+        (payload) => {
+          const newData = payload.new as { flash_sales_synced_at?: string };
+          if (newData?.flash_sales_synced_at) {
+            setLastCronSyncAt(newData.flash_sales_synced_at);
+          }
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [shopId]);
 
   // Auto sync from Shopee API every 1 hour
   const autoSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -488,15 +542,20 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
         />
 
         {/* Last sync info */}
-        {(lastSyncedAt || dataUpdatedAt) && (
+        {(lastCronSyncAt || lastSyncedAt || dataUpdatedAt) && (
           <div className="px-4 py-2 border-t bg-slate-50/50 text-xs text-slate-400 flex items-center justify-between">
             <span>
-              {lastSyncedAt && `Đồng bộ Shopee: ${formatDateTime(new Date(lastSyncedAt).getTime() / 1000)}`}
-              {lastSyncedAt && dataUpdatedAt && ' • '}
-              {dataUpdatedAt && `Cập nhật UI: ${formatDateTime(dataUpdatedAt / 1000)}`}
+              {lastCronSyncAt && (
+                <>
+                  <span className="text-green-600 font-medium">●</span>
+                  {' '}Cập nhật tự động: {formatISODateTime(lastCronSyncAt)}
+                </>
+              )}
+              {lastCronSyncAt && lastSyncedAt && ' • '}
+              {lastSyncedAt && `Đồng bộ thủ công: ${formatISODateTime(lastSyncedAt)}`}
             </span>
             <span className="text-slate-300">
-              Tự động làm mới mỗi 1 giờ
+              Tự động cập nhật mỗi 30 phút
             </span>
           </div>
         )}

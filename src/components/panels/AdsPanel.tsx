@@ -154,6 +154,7 @@ export function AdsPanel({ shopId, userId }: AdsPanelProps) {
   // Hook đọc data từ DB - KHÔNG gọi Shopee API trực tiếp
   const {
     campaigns,
+    allCampaigns, // TẤT CẢ campaigns để tính tổng performance
     hourlyData: realtimeHourlyData,
     syncStatus,
     shopLevelPerformance,
@@ -666,7 +667,7 @@ export function AdsPanel({ shopId, userId }: AdsPanelProps) {
                 </div>
               )}
               <PerformanceOverviewFromCampaigns 
-                campaigns={campaigns}
+                campaigns={allCampaigns}
                 dateRange={dateRange}
                 selectedDate={selectedDate}
                 shopLevelPerformance={shopLevelPerformance}
@@ -817,6 +818,166 @@ export function AdsPanel({ shopId, userId }: AdsPanelProps) {
 
 // ==================== SUB-COMPONENTS ====================
 
+// Component hiển thị chi tiết theo giờ với carousel (8 ô/hàng, mũi tên qua lại)
+function HourlyPerformanceCarousel({ 
+  hourlyData, 
+  selectedDate, 
+  dateRange 
+}: { 
+  hourlyData: any[];
+  selectedDate: Date;
+  dateRange: 'today' | '7days' | '30days';
+}) {
+  const [currentPage, setCurrentPage] = useState(0);
+  const itemsPerPage = 8;
+  const totalPages = Math.ceil(24 / itemsPerPage); // 3 pages: 0-7, 8-15, 16-23
+
+  const startIndex = currentPage * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const visibleHours = hourlyData.slice(startIndex, endIndex);
+
+  const hoursWithData = hourlyData.filter((h: any) => h.expense > 0 || h.broad_gmv > 0).length;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-semibold text-gray-700">
+          📊 Chi tiết theo giờ - {selectedDate.toLocaleDateString('vi-VN')}
+        </h4>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-500">
+            {hoursWithData}/24 giờ có dữ liệu
+          </span>
+          {dateRange !== 'today' && (
+            <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
+              ℹ️ Hiển thị dữ liệu của ngày {selectedDate.toLocaleDateString('vi-VN')}
+            </span>
+          )}
+        </div>
+      </div>
+      
+      {/* Carousel với mũi tên */}
+      <div className="flex items-center gap-2">
+        {/* Mũi tên trái */}
+        <button
+          onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))}
+          disabled={currentPage === 0}
+          className={cn(
+            "p-2 rounded-full border transition-all flex-shrink-0",
+            currentPage === 0 
+              ? "bg-gray-100 text-gray-300 cursor-not-allowed" 
+              : "bg-white text-gray-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300"
+          )}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+
+        {/* Grid 8 ô */}
+        <div className="flex-1 grid grid-cols-8 gap-2">
+          {visibleHours.map((hour: any) => {
+            const hourNum = hour.hour ?? 0;
+            const roas = hour.expense > 0 ? hour.broad_gmv / hour.expense : 0;
+            const hasData = hour.expense > 0 || hour.broad_gmv > 0;
+            
+            return (
+              <div 
+                key={hourNum}
+                className={cn(
+                  "p-2 rounded-lg border text-xs transition-all",
+                  hasData 
+                    ? "bg-white border-blue-300 shadow-sm hover:shadow-md" 
+                    : "bg-gray-50 border-gray-200 opacity-60"
+                )}
+                title={hasData ? `Giờ ${hourNum}:00 - Có hoạt động` : `Giờ ${hourNum}:00 - Không có hoạt động`}
+              >
+                <div className={cn(
+                  "font-bold text-center mb-1.5 pb-1 border-b",
+                  hasData ? "text-blue-600 border-blue-200" : "text-gray-400 border-gray-200"
+                )}>
+                  {hourNum.toString().padStart(2, '0')}h
+                </div>
+                {hasData ? (
+                  <div className="space-y-1 text-[10px]">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500">💰 Chi phí</span>
+                      <span className="font-semibold text-red-600">{formatPrice(hour.expense || 0)}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500">💵 Doanh số</span>
+                      <span className="font-semibold text-green-600">{formatPrice(hour.broad_gmv || 0)}</span>
+                    </div>
+                    <div className="flex justify-between items-center pt-0.5 border-t border-gray-100">
+                      <span className="text-gray-500">📈 ROAS</span>
+                      <span className={cn(
+                        "font-bold",
+                        roas >= 2 ? "text-green-600" : roas >= 1 ? "text-yellow-600" : "text-red-600"
+                      )}>
+                        {roas.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500">👆 Clicks</span>
+                      <span className="font-medium text-blue-600">{hour.clicks || 0}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500">👁️ Views</span>
+                      <span className="font-medium text-purple-600">{hour.impression || 0}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center text-[10px] text-gray-400 py-2">
+                    Không có dữ liệu
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Mũi tên phải */}
+        <button
+          onClick={() => setCurrentPage(prev => Math.min(totalPages - 1, prev + 1))}
+          disabled={currentPage === totalPages - 1}
+          className={cn(
+            "p-2 rounded-full border transition-all flex-shrink-0",
+            currentPage === totalPages - 1 
+              ? "bg-gray-100 text-gray-300 cursor-not-allowed" 
+              : "bg-white text-gray-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300"
+          )}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Page indicator */}
+      <div className="flex justify-center items-center gap-2 mt-3">
+        <span className="text-xs text-gray-500">
+          {startIndex.toString().padStart(2, '0')}h - {(endIndex - 1).toString().padStart(2, '0')}h
+        </span>
+        <div className="flex gap-1">
+          {Array.from({ length: totalPages }).map((_, idx) => (
+            <button
+              key={idx}
+              onClick={() => setCurrentPage(idx)}
+              className={cn(
+                "w-2 h-2 rounded-full transition-all",
+                currentPage === idx ? "bg-blue-500 w-4" : "bg-gray-300 hover:bg-gray-400"
+              )}
+            />
+          ))}
+        </div>
+        <span className="text-xs text-gray-400">
+          Trang {currentPage + 1}/{totalPages}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function PerformanceOverviewFromCampaigns({ campaigns, dateRange, selectedDate, shopLevelPerformance }: { 
   campaigns: CampaignWithPerformance[];
   dateRange: 'today' | '7days' | '30days';
@@ -825,60 +986,66 @@ function PerformanceOverviewFromCampaigns({ campaigns, dateRange, selectedDate, 
     impression: number;
     clicks: number;
     ctr: number;
-    orders: number;
-    gmv: number;
+    broad_order: number;
+    broad_item_sold: number;
+    broad_gmv: number;
     expense: number;
-    roas: number;
-    acos: number;
+    broad_roas: number;
   } | null;
 }) {
-  // Ưu tiên sử dụng shop-level performance nếu có (chính xác hơn)
+  // QUAN TRỌNG: Ưu tiên sử dụng shop-level performance từ API
+  // Vì nó bao gồm TẤT CẢ loại ads (search_product, discovery, search_shop)
+  // và tất cả status (ongoing, paused, ended) có data trong ngày
   const currentTotals = useMemo(() => {
-    // Nếu có shop-level data, sử dụng nó
-    if (shopLevelPerformance) {
+    // Ưu tiên shop-level performance nếu có
+    if (shopLevelPerformance && (shopLevelPerformance.impression > 0 || shopLevelPerformance.expense > 0)) {
       return {
         impression: shopLevelPerformance.impression,
         clicks: shopLevelPerformance.clicks,
         ctr: shopLevelPerformance.ctr,
-        orders: shopLevelPerformance.orders,
-        itemsSold: 0,
-        conversions: shopLevelPerformance.clicks > 0 ? (shopLevelPerformance.orders / shopLevelPerformance.clicks) * 100 : 0,
-        gmv: shopLevelPerformance.gmv,
+        broad_order: shopLevelPerformance.broad_order,
+        broad_item_sold: shopLevelPerformance.broad_item_sold,
+        broad_gmv: shopLevelPerformance.broad_gmv,
         expense: shopLevelPerformance.expense,
-        roas: shopLevelPerformance.roas,
+        broad_roas: shopLevelPerformance.broad_roas,
       };
     }
 
-    // Fallback: tính từ campaigns (có thể không đầy đủ)
+    // Fallback: Tính từ campaigns (bao gồm tất cả status có impression > 0 hoặc expense > 0)
     if (!campaigns || campaigns.length === 0) {
-      return { impression: 0, clicks: 0, ctr: 0, orders: 0, itemsSold: 0, conversions: 0, gmv: 0, expense: 0, roas: 0 };
+      return { impression: 0, clicks: 0, ctr: 0, broad_order: 0, broad_item_sold: 0, broad_gmv: 0, expense: 0, broad_roas: 0 };
     }
     
+    // Filter: Chỉ tính campaigns có data (impression > 0 OR expense > 0)
+    // Giống logic của Shopee Seller Center
     const totals = campaigns.reduce((acc, c) => {
       const perf = c.performance;
       if (!perf) return acc;
+      
+      // Điều kiện: Nếu có impression HOẶC expense thì tính vào tổng
+      // Bỏ qua status - campaign paused/ended vẫn được tính nếu có data
+      if ((perf.impression || 0) === 0 && (perf.expense || 0) === 0) {
+        return acc;
+      }
+      
       return {
         impression: acc.impression + (perf.impression || 0),
         clicks: acc.clicks + (perf.clicks || 0),
         ctr: 0,
-        orders: acc.orders + (perf.orders || 0),
-        itemsSold: 0,
-        conversions: 0,
-        gmv: acc.gmv + (perf.gmv || 0),
+        broad_order: acc.broad_order + (perf.orders || 0),
+        broad_item_sold: 0, // Không có trong campaign performance
+        broad_gmv: acc.broad_gmv + (perf.gmv || 0),
         expense: acc.expense + (perf.expense || 0),
-        roas: 0,
+        broad_roas: 0,
       };
-    }, { impression: 0, clicks: 0, ctr: 0, orders: 0, itemsSold: 0, conversions: 0, gmv: 0, expense: 0, roas: 0 });
+    }, { impression: 0, clicks: 0, ctr: 0, broad_order: 0, broad_item_sold: 0, broad_gmv: 0, expense: 0, broad_roas: 0 });
 
     // Calculate derived metrics
     if (totals.impression > 0) {
       totals.ctr = (totals.clicks / totals.impression) * 100;
     }
-    if (totals.clicks > 0) {
-      totals.conversions = (totals.orders / totals.clicks) * 100;
-    }
     if (totals.expense > 0) {
-      totals.roas = totals.gmv / totals.expense;
+      totals.broad_roas = totals.broad_gmv / totals.expense;
     }
 
     return totals;
@@ -897,13 +1064,14 @@ function PerformanceOverviewFromCampaigns({ campaigns, dateRange, selectedDate, 
     : '30 ngày đến ' + selectedDate.toLocaleDateString('vi-VN');
 
   const metrics = [
-    { label: 'Lượt xem', value: currentTotals.impression, format: formatCompact, color: 'blue' },
-    { label: 'Lượt click', value: currentTotals.clicks, format: formatCompact, color: 'indigo' },
-    { label: 'Tỉ lệ click (%)', value: currentTotals.ctr, format: (v: number) => v.toFixed(1) + '%', color: 'purple' },
-    { label: 'Đơn hàng', value: currentTotals.orders, format: (v: number) => v.toString(), color: 'green' },
-    { label: 'Doanh số', value: currentTotals.gmv, format: (v: number) => 'đ' + formatCompact(v), color: 'orange' },
-    { label: 'Chi phí DV Hiển thị', value: currentTotals.expense, format: (v: number) => 'đ' + formatCompact(v), color: 'red' },
-    { label: 'ROAS', value: currentTotals.roas, format: (v: number) => v.toFixed(2), color: 'emerald' },
+    { label: 'Số lượt xem', value: currentTotals.impression, format: formatCompact, color: 'blue' },
+    { label: 'Số lượt click', value: currentTotals.clicks, format: formatCompact, color: 'indigo' },
+    { label: 'Tỉ lệ click (CTR)', value: currentTotals.ctr, format: (v: number) => v.toFixed(2) + '%', color: 'purple' },
+    { label: 'Số đơn hàng', value: currentTotals.broad_order, format: (v: number) => v.toString(), color: 'green' },
+    { label: 'Sản phẩm đã bán', value: currentTotals.broad_item_sold, format: (v: number) => v.toString(), color: 'teal' },
+    { label: 'Doanh số (GMV)', value: currentTotals.broad_gmv, format: (v: number) => 'đ' + formatCompact(v), color: 'orange' },
+    { label: 'Chi phí', value: currentTotals.expense, format: (v: number) => 'đ' + formatCompact(v), color: 'red' },
+    { label: 'ROAS', value: currentTotals.broad_roas, format: (v: number) => v.toFixed(2), color: 'emerald' },
   ];
 
   const colorMap: Record<string, string> = {
@@ -911,6 +1079,7 @@ function PerformanceOverviewFromCampaigns({ campaigns, dateRange, selectedDate, 
     indigo: 'bg-indigo-50 border-indigo-200',
     purple: 'bg-purple-50 border-purple-200',
     green: 'bg-green-50 border-green-200',
+    teal: 'bg-teal-50 border-teal-200',
     orange: 'bg-orange-50 border-orange-200',
     red: 'bg-red-50 border-red-200',
     emerald: 'bg-emerald-50 border-emerald-200',
@@ -921,6 +1090,7 @@ function PerformanceOverviewFromCampaigns({ campaigns, dateRange, selectedDate, 
     indigo: 'text-indigo-700',
     purple: 'text-purple-700',
     green: 'text-green-700',
+    teal: 'text-teal-700',
     orange: 'text-orange-700',
     red: 'text-red-700',
     emerald: 'text-emerald-700',
@@ -1248,83 +1418,11 @@ function CampaignList({
                       Đang tải dữ liệu theo giờ...
                     </div>
                   ) : (
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-sm font-semibold text-gray-700">
-                          📊 Chi tiết theo giờ - {selectedDate.toLocaleDateString('vi-VN')}
-                        </h4>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-gray-500">
-                            {hourlyData.filter((h: any) => h.expense > 0 || h.broad_gmv > 0).length}/24 giờ có dữ liệu
-                          </span>
-                          {dateRange !== 'today' && (
-                            <span className="text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded-full">
-                              ℹ️ Hiển thị dữ liệu của ngày {selectedDate.toLocaleDateString('vi-VN')}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-12 gap-2">
-                        {hourlyData.map((hour: any) => {
-                          const hourNum = hour.hour || 0;
-                          const roas = hour.expense > 0 ? hour.broad_gmv / hour.expense : 0;
-                          const hasData = hour.expense > 0 || hour.broad_gmv > 0;
-                          
-                          return (
-                            <div 
-                              key={hourNum}
-                              className={cn(
-                                "p-2 rounded-lg border text-xs transition-all",
-                                hasData 
-                                  ? "bg-white border-blue-300 shadow-sm hover:shadow-md" 
-                                  : "bg-gray-50 border-gray-200 opacity-60"
-                              )}
-                              title={hasData ? `Giờ ${hourNum}:00 - Có hoạt động` : `Giờ ${hourNum}:00 - Không có hoạt động`}
-                            >
-                              <div className={cn(
-                                "font-bold text-center mb-1.5 pb-1 border-b",
-                                hasData ? "text-blue-600 border-blue-200" : "text-gray-400 border-gray-200"
-                              )}>
-                                {hourNum.toString().padStart(2, '0')}h
-                              </div>
-                              {hasData ? (
-                                <div className="space-y-1 text-[10px]">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-gray-500">💰 Chi phí</span>
-                                    <span className="font-semibold text-red-600">{formatPrice(hour.expense || 0)}</span>
-                                  </div>
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-gray-500">💵 Doanh số</span>
-                                    <span className="font-semibold text-green-600">{formatPrice(hour.broad_gmv || 0)}</span>
-                                  </div>
-                                  <div className="flex justify-between items-center pt-0.5 border-t border-gray-100">
-                                    <span className="text-gray-500">📈 ROAS</span>
-                                    <span className={cn(
-                                      "font-bold",
-                                      roas >= 2 ? "text-green-600" : roas >= 1 ? "text-yellow-600" : "text-red-600"
-                                    )}>
-                                      {roas.toFixed(2)}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-gray-500">👆 Clicks</span>
-                                    <span className="font-medium text-blue-600">{hour.clicks || 0}</span>
-                                  </div>
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-gray-500">👁️ Views</span>
-                                    <span className="font-medium text-purple-600">{hour.impression || 0}</span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="text-center text-[10px] text-gray-400 py-2">
-                                  Không có dữ liệu
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <HourlyPerformanceCarousel 
+                      hourlyData={hourlyData}
+                      selectedDate={selectedDate}
+                      dateRange={dateRange}
+                    />
                   )}
                 </div>
               )}

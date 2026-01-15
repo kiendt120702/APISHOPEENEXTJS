@@ -168,7 +168,13 @@ CREATE TRIGGER trigger_update_ads_sync_status_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_ads_sync_status_updated_at();
 
--- 9. Enable Realtime for these tables (run separately if needed)
+-- 9. Enable Realtime for these tables
+-- REPLICA IDENTITY FULL cho phép Realtime broadcast đầy đủ row data
+ALTER TABLE apishopee_ads_performance_daily REPLICA IDENTITY FULL;
+ALTER TABLE apishopee_ads_performance_hourly REPLICA IDENTITY FULL;
+ALTER TABLE apishopee_ads_sync_status REPLICA IDENTITY FULL;
+
+-- Uncomment để add vào publication (chạy riêng nếu cần)
 -- ALTER PUBLICATION supabase_realtime ADD TABLE apishopee_ads_campaign_data;
 -- ALTER PUBLICATION supabase_realtime ADD TABLE apishopee_ads_performance_daily;
 -- ALTER PUBLICATION supabase_realtime ADD TABLE apishopee_ads_performance_hourly;

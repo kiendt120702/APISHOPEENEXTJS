@@ -114,17 +114,18 @@ export interface UseAdsDataOptions {
 export interface UseAdsDataReturn {
   // Data
   campaigns: CampaignWithPerformance[];
+  allCampaigns: CampaignWithPerformance[]; // TẤT CẢ campaigns để tính tổng
   hourlyData: Record<number, AdsPerformanceHourly[]>;
   syncStatus: AdsSyncStatus | null;
   shopLevelPerformance: {
     impression: number;
     clicks: number;
     ctr: number;
-    orders: number;
-    gmv: number;
+    broad_order: number;
+    broad_item_sold: number;
+    broad_gmv: number;
     expense: number;
-    roas: number;
-    acos: number;
+    broad_roas: number;
   } | null;
   
   // Loading states
@@ -138,6 +139,7 @@ export interface UseAdsDataReturn {
   // Actions
   refetch: () => Promise<void>;
   syncFromAPI: () => Promise<{ success: boolean; message: string }>;
+  backfillFromAPI: (daysBack?: number) => Promise<{ success: boolean; message: string }>;
   loadHourlyData: (campaignId: number) => Promise<void>;
   
   // Metadata
@@ -167,6 +169,40 @@ function getDateRange(dateRange: 'today' | '7days' | '30days', selectedDate: Dat
   };
 }
 
+// Lấy khoảng thời gian của kỳ trước để so sánh
+function getPreviousDateRange(dateRange: 'today' | '7days' | '30days', selectedDate: Date): { startDate: string; endDate: string } {
+  const currentEnd = new Date(selectedDate);
+  let currentStart = new Date(selectedDate);
+  
+  if (dateRange === '7days') {
+    currentStart.setDate(currentStart.getDate() - 6);
+  } else if (dateRange === '30days') {
+    currentStart.setDate(currentStart.getDate() - 29);
+  }
+
+  // Kỳ trước: cùng độ dài, ngay trước kỳ hiện tại
+  const daysDiff = dateRange === 'today' ? 1 : dateRange === '7days' ? 7 : 30;
+  
+  const prevEnd = new Date(currentStart);
+  prevEnd.setDate(prevEnd.getDate() - 1); // Ngày trước ngày bắt đầu kỳ hiện tại
+  
+  const prevStart = new Date(prevEnd);
+  prevStart.setDate(prevStart.getDate() - daysDiff + 1);
+
+  return {
+    startDate: formatDateForDB(prevStart),
+    endDate: formatDateForDB(prevEnd),
+  };
+}
+
+// Tính % thay đổi
+function calculatePercentChange(current: number, previous: number): number {
+  if (previous === 0) {
+    return current > 0 ? 100 : 0;
+  }
+  return ((current - previous) / previous) * 100;
+}
+
 // ==================== MAIN HOOK ====================
 
 export function useAdsData(
@@ -190,11 +226,13 @@ export function useAdsData(
 
   // Query keys
   const campaignsQueryKey = ['ads-campaigns', shopId, statusFilter];
+  const allCampaignsQueryKey = ['ads-all-campaigns', shopId]; // Để tính tổng performance
   const performanceQueryKey = ['ads-performance', shopId, dateRange, formatDateForDB(selectedDate)];
+  const prevPerformanceQueryKey = ['ads-performance-prev', shopId, dateRange, formatDateForDB(selectedDate)];
 
   // ==================== FETCH FUNCTIONS ====================
 
-  // Fetch campaigns from cache
+  // Fetch campaigns from cache (filtered by status for display)
   const fetchCampaigns = async (): Promise<AdsCampaign[]> => {
     if (!shopId || !userId) return [];
 
@@ -209,6 +247,20 @@ export function useAdsData(
     }
 
     const { data, error } = await query;
+
+    if (error) throw new Error(error.message);
+    return (data as AdsCampaign[]) || [];
+  };
+
+  // Fetch ALL campaigns (không filter status) để tính tổng performance
+  const fetchAllCampaigns = async (): Promise<AdsCampaign[]> => {
+    if (!shopId || !userId) return [];
+
+    const { data, error } = await supabase
+      .from('apishopee_ads_campaign_data')
+      .select('*')
+      .eq('shop_id', shopId)
+      .order('name', { ascending: true });
 
     if (error) throw new Error(error.message);
     return (data as AdsCampaign[]) || [];
@@ -236,6 +288,31 @@ export function useAdsData(
       return (data as AdsPerformanceDaily[]) || [];
     } catch (err) {
       console.warn('[useAdsData] Error fetching daily performance:', err);
+      return [];
+    }
+  };
+
+  // Fetch previous period performance for comparison
+  const fetchPreviousPerformance = async (): Promise<AdsPerformanceDaily[]> => {
+    if (!shopId || !userId) return [];
+
+    try {
+      const { startDate, endDate } = getPreviousDateRange(dateRange, selectedDate);
+
+      const { data, error } = await supabase
+        .from('apishopee_ads_performance_daily')
+        .select('*')
+        .eq('shop_id', shopId)
+        .gte('performance_date', startDate)
+        .lte('performance_date', endDate);
+
+      if (error) {
+        console.warn('[useAdsData] Previous performance fetch error:', error.message);
+        return [];
+      }
+      return (data as AdsPerformanceDaily[]) || [];
+    } catch (err) {
+      console.warn('[useAdsData] Error fetching previous performance:', err);
       return [];
     }
   };
@@ -288,24 +365,24 @@ export function useAdsData(
       const totals = data.reduce((acc, day) => ({
         impression: acc.impression + (day.impression || 0),
         clicks: acc.clicks + (day.clicks || 0),
-        orders: acc.orders + (day.broad_order || 0),
-        gmv: acc.gmv + (day.broad_gmv || 0),
+        broad_order: acc.broad_order + (day.broad_order || 0),
+        broad_item_sold: acc.broad_item_sold + (day.broad_item_sold || 0),
+        broad_gmv: acc.broad_gmv + (day.broad_gmv || 0),
         expense: acc.expense + (day.expense || 0),
-      }), { impression: 0, clicks: 0, orders: 0, gmv: 0, expense: 0 });
+      }), { impression: 0, clicks: 0, broad_order: 0, broad_item_sold: 0, broad_gmv: 0, expense: 0 });
 
       const ctr = totals.impression > 0 ? (totals.clicks / totals.impression) * 100 : 0;
-      const roas = totals.expense > 0 ? totals.gmv / totals.expense : 0;
-      const acos = totals.gmv > 0 ? (totals.expense / totals.gmv) * 100 : 0;
+      const broad_roas = totals.expense > 0 ? totals.broad_gmv / totals.expense : 0;
 
       return {
         impression: totals.impression,
         clicks: totals.clicks,
         ctr,
-        orders: totals.orders,
-        gmv: totals.gmv,
+        broad_order: totals.broad_order,
+        broad_item_sold: totals.broad_item_sold,
+        broad_gmv: totals.broad_gmv,
         expense: totals.expense,
-        roas,
-        acos,
+        broad_roas,
       };
     } catch (err) {
       console.warn('[useAdsData] Error fetching shop-level performance:', err);
@@ -315,7 +392,7 @@ export function useAdsData(
 
   // ==================== REACT QUERY ====================
 
-  // Campaigns query
+  // Campaigns query (filtered for display)
   const {
     data: campaignsData,
     isLoading: campaignsLoading,
@@ -328,6 +405,20 @@ export function useAdsData(
     queryFn: fetchCampaigns,
     enabled: !!shopId && !!userId,
     staleTime: 2 * 60 * 1000, // 2 minutes
+    gcTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
+  });
+
+  // ALL Campaigns query (để tính tổng performance)
+  const {
+    data: allCampaignsData,
+    refetch: refetchAllCampaigns,
+  } = useQuery({
+    queryKey: allCampaignsQueryKey,
+    queryFn: fetchAllCampaigns,
+    enabled: !!shopId && !!userId,
+    staleTime: 2 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
     refetchOnMount: 'always',
@@ -350,6 +441,19 @@ export function useAdsData(
     refetchOnMount: 'always',
   });
 
+  // Previous period performance query (for comparison)
+  const {
+    data: prevPerformanceData,
+  } = useQuery({
+    queryKey: prevPerformanceQueryKey,
+    queryFn: fetchPreviousPerformance,
+    enabled: !!shopId && !!userId,
+    staleTime: 5 * 60 * 1000, // 5 minutes - less frequent updates for historical data
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: 'always',
+  });
+
   // Shop-level performance query (tổng tất cả ads - chính xác hơn)
   const shopLevelQueryKey = ['ads-shop-level', shopId, dateRange, formatDateForDB(selectedDate)];
   const {
@@ -367,17 +471,9 @@ export function useAdsData(
 
   // ==================== COMBINE DATA ====================
 
-  // Combine campaigns with performance data
-  const campaignsWithPerformance: CampaignWithPerformance[] = (campaignsData || []).map(campaign => {
-    // Filter performance for this campaign
-    const campPerf = (performanceData || []).filter(p => p.campaign_id === campaign.campaign_id);
-
-    if (campPerf.length === 0) {
-      return campaign;
-    }
-
-    // Sum up performance
-    const totals = campPerf.reduce(
+  // Helper function to calculate totals from performance data
+  const calculateTotals = (perfData: AdsPerformanceDaily[]) => {
+    const totals = perfData.reduce(
       (acc, day) => ({
         impression: acc.impression + (day.impression || 0),
         clicks: acc.clicks + (day.clicks || 0),
@@ -392,24 +488,90 @@ export function useAdsData(
     const roas = totals.expense > 0 ? totals.gmv / totals.expense : 0;
     const acos = totals.gmv > 0 ? (totals.expense / totals.gmv) * 100 : 0;
 
+    return { ...totals, ctr, roas, acos };
+  };
+
+  // Combine campaigns with performance data (cho display - chỉ ongoing)
+  const campaignsWithPerformance: CampaignWithPerformance[] = (campaignsData || []).map(campaign => {
+    // Filter performance for this campaign - current period
+    const campPerf = (performanceData || []).filter(p => p.campaign_id === campaign.campaign_id);
+    // Filter performance for this campaign - previous period
+    const prevCampPerf = (prevPerformanceData || []).filter(p => p.campaign_id === campaign.campaign_id);
+
+    if (campPerf.length === 0) {
+      return campaign;
+    }
+
+    // Calculate current period totals
+    const current = calculateTotals(campPerf);
+    
+    // Calculate previous period totals for comparison
+    const previous = calculateTotals(prevCampPerf);
+
+    // Calculate comparison (% change)
+    const comparison = prevCampPerf.length > 0 ? {
+      expense_change: calculatePercentChange(current.expense, previous.expense),
+      gmv_change: calculatePercentChange(current.gmv, previous.gmv),
+      roas_change: calculatePercentChange(current.roas, previous.roas),
+      clicks_change: calculatePercentChange(current.clicks, previous.clicks),
+      acos_change: calculatePercentChange(current.acos, previous.acos),
+    } : undefined;
+
     return {
       ...campaign,
       performance: {
-        impression: totals.impression,
-        clicks: totals.clicks,
-        ctr,
-        expense: totals.expense,
-        orders: totals.orders,
-        gmv: totals.gmv,
-        roas,
-        acos,
+        impression: current.impression,
+        clicks: current.clicks,
+        ctr: current.ctr,
+        expense: current.expense,
+        orders: current.orders,
+        gmv: current.gmv,
+        roas: current.roas,
+        acos: current.acos,
       },
+      comparison,
+    };
+  });
+
+  // Combine ALL campaigns with performance data (để tính tổng - bao gồm tất cả status)
+  const allCampaignsWithPerformance: CampaignWithPerformance[] = (allCampaignsData || []).map(campaign => {
+    const campPerf = (performanceData || []).filter(p => p.campaign_id === campaign.campaign_id);
+    const prevCampPerf = (prevPerformanceData || []).filter(p => p.campaign_id === campaign.campaign_id);
+
+    if (campPerf.length === 0) {
+      return campaign;
+    }
+
+    const current = calculateTotals(campPerf);
+    const previous = calculateTotals(prevCampPerf);
+
+    const comparison = prevCampPerf.length > 0 ? {
+      expense_change: calculatePercentChange(current.expense, previous.expense),
+      gmv_change: calculatePercentChange(current.gmv, previous.gmv),
+      roas_change: calculatePercentChange(current.roas, previous.roas),
+      clicks_change: calculatePercentChange(current.clicks, previous.clicks),
+      acos_change: calculatePercentChange(current.acos, previous.acos),
+    } : undefined;
+
+    return {
+      ...campaign,
+      performance: {
+        impression: current.impression,
+        clicks: current.clicks,
+        ctr: current.ctr,
+        expense: current.expense,
+        orders: current.orders,
+        gmv: current.gmv,
+        roas: current.roas,
+        acos: current.acos,
+      },
+      comparison,
     };
   });
 
   // ==================== ACTIONS ====================
 
-  // Sync from Shopee API
+  // Sync from Shopee API (realtime - chỉ hôm nay)
   const syncFromAPI = useCallback(async (): Promise<{ success: boolean; message: string }> => {
     if (syncing) return { success: false, message: 'Đang đồng bộ...' };
 
@@ -429,6 +591,7 @@ export function useAdsData(
         // Invalidate queries to trigger refetch
         queryClient.invalidateQueries({ queryKey: campaignsQueryKey });
         queryClient.invalidateQueries({ queryKey: performanceQueryKey });
+        queryClient.invalidateQueries({ queryKey: prevPerformanceQueryKey });
 
         return {
           success: true,
@@ -442,7 +605,50 @@ export function useAdsData(
     } finally {
       setSyncing(false);
     }
-  }, [shopId, syncing, fetchSyncStatus, queryClient, campaignsQueryKey, performanceQueryKey, shopLevelQueryKey]);
+  }, [shopId, syncing, fetchSyncStatus, queryClient, campaignsQueryKey, performanceQueryKey, prevPerformanceQueryKey, shopLevelQueryKey]);
+
+  /**
+   * Backfill từ Shopee API - Sync 7 ngày để cập nhật GMV attribution
+   * 
+   * LÝ DO CẦN BACKFILL:
+   * Shopee Ads có "7-day attribution window" - đơn hàng hôm nay có thể được gán
+   * cho click từ 3-7 ngày trước. Nếu chỉ sync hôm nay, GMV của các ngày cũ sẽ
+   * không được cập nhật → dữ liệu không khớp với Shopee Seller Center.
+   */
+  const backfillFromAPI = useCallback(async (daysBack: number = 7): Promise<{ success: boolean; message: string }> => {
+    if (syncing) return { success: false, message: 'Đang đồng bộ...' };
+
+    setSyncing(true);
+    try {
+      const res = await supabase.functions.invoke('apishopee-ads-sync', {
+        body: { action: 'backfill', shop_id: shopId, days_back: daysBack },
+      });
+
+      if (res.error) throw res.error;
+
+      const result = res.data;
+      if (result.success) {
+        lastSyncRef.current = Date.now();
+        await fetchSyncStatus();
+        
+        // Invalidate queries to trigger refetch
+        queryClient.invalidateQueries({ queryKey: campaignsQueryKey });
+        queryClient.invalidateQueries({ queryKey: performanceQueryKey });
+        queryClient.invalidateQueries({ queryKey: prevPerformanceQueryKey });
+
+        return {
+          success: true,
+          message: `Backfill ${daysBack} ngày: ${result.campaigns_synced} chiến dịch, ${result.daily_records} daily, ${result.hourly_records} hourly`,
+        };
+      } else {
+        throw new Error(result.error || 'Backfill failed');
+      }
+    } catch (err) {
+      return { success: false, message: (err as Error).message };
+    } finally {
+      setSyncing(false);
+    }
+  }, [shopId, syncing, fetchSyncStatus, queryClient, campaignsQueryKey, performanceQueryKey, prevPerformanceQueryKey, shopLevelQueryKey]);
 
   // Load hourly data for a specific campaign
   const loadHourlyData = useCallback(async (campaignId: number) => {
@@ -648,6 +854,7 @@ export function useAdsData(
 
   return {
     campaigns: campaignsWithPerformance,
+    allCampaigns: allCampaignsWithPerformance, // TẤT CẢ campaigns để tính tổng
     hourlyData,
     syncStatus,
     shopLevelPerformance: shopLevelData || null,
@@ -657,6 +864,7 @@ export function useAdsData(
     error: campaignsError?.message || performanceError?.message || null,
     refetch,
     syncFromAPI,
+    backfillFromAPI,
     loadHourlyData,
     dataUpdatedAt: campaignsUpdatedAt,
     lastSyncAt: syncStatus?.last_sync_at || null,
