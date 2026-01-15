@@ -3,7 +3,7 @@
  * Giao diện theo mẫu Shopee Seller Center
  */
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Trash2, Eye, Zap } from 'lucide-react';
 import { ColumnDef } from '@tanstack/react-table';
@@ -92,8 +92,8 @@ function getErrorMessage(error: string): string {
   return ERROR_MESSAGES[error] || error;
 }
 
-// Auto sync interval: 1 hour in milliseconds
-const AUTO_SYNC_INTERVAL = 60 * 60 * 1000;
+// Auto sync interval: 1 hour in milliseconds - REMOVED: Cron job handles this
+// const AUTO_SYNC_INTERVAL = 60 * 60 * 1000;
 
 export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
   const { toast } = useToast();
@@ -109,7 +109,7 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
   // View state
   const [view, setView] = useState<'list' | 'create'>('list');
 
-  // Hooks - Không tự động sync, người dùng phải nhấn nút "Làm mới"
+  // Hooks - Không tự động sync, cron job handles this
   const { isSyncing, triggerSync, lastSyncedAt } = useSyncData({
     shopId,
     userId,
@@ -136,9 +136,9 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
     
     fetchSyncStatus();
     
-    // Subscribe to realtime updates
+    // Subscribe to realtime updates - chỉ update UI khi DB thay đổi
     const channel = supabase
-      .channel('sync-status-changes')
+      .channel(`sync-status-changes-${shopId}`)
       .on(
         'postgres_changes',
         {
@@ -161,35 +161,8 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
     };
   }, [shopId]);
 
-  // Auto sync from Shopee API every 1 hour
-  const autoSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  
-  useEffect(() => {
-    // Clear existing interval
-    if (autoSyncIntervalRef.current) {
-      clearInterval(autoSyncIntervalRef.current);
-    }
-
-    // Set up auto sync interval
-    autoSyncIntervalRef.current = setInterval(async () => {
-      console.log('[FlashSalePanel] Auto-sync triggered (every 1 hour)');
-      try {
-        // Sync từ Shopee API
-        await triggerSync(true);
-        // Refetch data từ database để hiển thị UI
-        await refetch();
-      } catch (err) {
-        console.error('[FlashSalePanel] Auto-sync error:', err);
-      }
-    }, AUTO_SYNC_INTERVAL);
-
-    // Cleanup on unmount or when dependencies change
-    return () => {
-      if (autoSyncIntervalRef.current) {
-        clearInterval(autoSyncIntervalRef.current);
-      }
-    };
-  }, [shopId, userId, triggerSync, refetch]);
+  // REMOVED: Auto sync interval - Cron job handles this now
+  // Data will be refreshed automatically via realtime subscription in useFlashSaleData
 
   // Debug: log khi data thay đổi
   console.log('[FlashSalePanel] shopId:', shopId, 'userId:', userId, 'flashSales count:', flashSales?.length, 'loading:', loading, 'error:', error);

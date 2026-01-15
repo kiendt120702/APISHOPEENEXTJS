@@ -285,55 +285,29 @@ async function syncCampaigns(
 }
 
 /**
- * Sync daily performance cho TẤT CẢ campaigns (không chỉ ongoing)
- * Lấy 7 ngày gần nhất
+ * Sync daily performance cho CHỈ 1 NGÀY cụ thể
+ * Chia campaigns thành batches nhỏ để tránh URL quá dài
  * 
- * QUAN TRỌNG: Sync cho tất cả campaigns để dữ liệu tổng hợp khớp với shop-level
+ * QUAN TRỌNG: Chỉ sync 1 ngày mỗi lần để tránh timeout
  */
-async function syncDailyPerformance(
+async function syncDailyPerformanceForDate(
   supabase: ReturnType<typeof createClient>,
   credentials: ShopCredentials,
   shopId: number,
-  campaigns: CampaignInfo[]
+  campaigns: CampaignInfo[],
+  targetDate: Date
 ): Promise<number> {
   if (campaigns.length === 0) return 0;
 
-  console.log(`[ADS-SYNC] Syncing daily performance for ALL ${campaigns.length} campaigns (not just ongoing)...`);
-
-  // Sử dụng Vietnam timezone để lấy đúng ngày
-  const today = getVietnamDate();
-  const sevenDaysAgo = new Date(today.getTime());
-  sevenDaysAgo.setUTCDate(today.getUTCDate() - 6);
-
-  const startDate = formatDateForShopee(sevenDaysAgo);
-  const endDate = formatDateForShopee(today);
+  const dateStr = formatDateForShopee(targetDate);
+  const dbDate = formatDateForDB(targetDate);
   
-  console.log(`[ADS-SYNC] Date range: ${startDate} to ${endDate} (VN timezone)`);
+  console.log(`[ADS-SYNC] Syncing daily performance for date: ${dateStr} (${campaigns.length} campaigns)`);
   
-  const campaignIds = campaigns.map(c => c.campaign_id).join(',');
-
-  const perfResult = await callShopeeAPI(
-    credentials,
-    shopId,
-    '/api/v2/ads/get_product_campaign_daily_performance',
-    'GET',
-    { start_date: startDate, end_date: endDate, campaign_id_list: campaignIds }
-  );
-
-  if (perfResult.error) {
-    console.error('[ADS-SYNC] Daily performance error:', perfResult.message || perfResult.error);
-    return 0;
-  }
-
-  const campaignPerfList = perfResult.response?.campaign_list || [];
-  if (campaignPerfList.length === 0) {
-    console.log('[ADS-SYNC] No daily performance data');
-    return 0;
-  }
-
-  // Prepare upsert data
+  // Chia campaigns thành batches nhỏ (50 campaigns/batch)
+  const BATCH_SIZE = 50;
   const now = new Date().toISOString();
-  const upsertData: Array<{
+  const allUpsertData: Array<{
     shop_id: number;
     campaign_id: number;
     performance_date: string;
@@ -352,68 +326,104 @@ async function syncDailyPerformance(
     synced_at: string;
   }> = [];
 
-  for (const campPerf of campaignPerfList) {
-    const metricsList = campPerf.metrics_list || campPerf.performance_list || [];
+  for (let i = 0; i < campaigns.length; i += BATCH_SIZE) {
+    const batch = campaigns.slice(i, i + BATCH_SIZE);
+    const campaignIds = batch.map(c => c.campaign_id).join(',');
+
+    const perfResult = await callShopeeAPI(
+      credentials,
+      shopId,
+      '/api/v2/ads/get_product_campaign_daily_performance',
+      'GET',
+      { start_date: dateStr, end_date: dateStr, campaign_id_list: campaignIds }
+    );
+
+    if (perfResult.error) {
+      console.error(`[ADS-SYNC] Daily perf error batch ${Math.floor(i / BATCH_SIZE) + 1}:`, perfResult.message || perfResult.error);
+      continue;
+    }
+
+    const campaignPerfList = perfResult.response?.campaign_list || [];
     
-    for (const dayMetrics of metricsList) {
-      // Parse date from DD-MM-YYYY to YYYY-MM-DD
-      const dateParts = dayMetrics.date?.split('-') || [];
-      let perfDate: string;
-      if (dateParts.length === 3) {
-        perfDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
-      } else {
-        continue; // Skip if date is invalid
+    for (const campPerf of campaignPerfList) {
+      const metricsList = campPerf.metrics_list || campPerf.performance_list || [];
+      
+      for (const dayMetrics of metricsList) {
+        const expense = dayMetrics.expense || 0;
+        const broadGmv = dayMetrics.broad_gmv || 0;
+        const roas = expense > 0 ? broadGmv / expense : 0;
+        const acos = broadGmv > 0 ? (expense / broadGmv) * 100 : 0;
+
+        allUpsertData.push({
+          shop_id: shopId,
+          campaign_id: campPerf.campaign_id,
+          performance_date: dbDate,
+          impression: dayMetrics.impression || 0,
+          clicks: dayMetrics.clicks || 0,
+          ctr: dayMetrics.ctr || 0,
+          expense,
+          direct_order: dayMetrics.direct_order || 0,
+          direct_gmv: dayMetrics.direct_gmv || 0,
+          broad_order: dayMetrics.broad_order || 0,
+          broad_gmv: broadGmv,
+          direct_item_sold: dayMetrics.direct_item_sold || 0,
+          broad_item_sold: dayMetrics.broad_item_sold || 0,
+          roas,
+          acos,
+          synced_at: now,
+        });
       }
+    }
 
-      const expense = dayMetrics.expense || 0;
-      const broadGmv = dayMetrics.broad_gmv || 0;
-      const roas = expense > 0 ? broadGmv / expense : 0;
-      const acos = broadGmv > 0 ? (expense / broadGmv) * 100 : 0;
-
-      upsertData.push({
-        shop_id: shopId,
-        campaign_id: campPerf.campaign_id,
-        performance_date: perfDate,
-        impression: dayMetrics.impression || 0,
-        clicks: dayMetrics.clicks || 0,
-        ctr: dayMetrics.ctr || 0,
-        expense,
-        direct_order: dayMetrics.direct_order || 0,
-        direct_gmv: dayMetrics.direct_gmv || 0,
-        broad_order: dayMetrics.broad_order || 0,
-        broad_gmv: broadGmv,
-        direct_item_sold: dayMetrics.direct_item_sold || 0,
-        broad_item_sold: dayMetrics.broad_item_sold || 0,
-        roas,
-        acos,
-        synced_at: now,
-      });
+    // Delay nhỏ giữa các batch
+    if (i + BATCH_SIZE < campaigns.length) {
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
   }
 
-  if (upsertData.length === 0) {
-    console.log('[ADS-SYNC] No daily performance records to save');
+  if (allUpsertData.length === 0) {
     return 0;
   }
 
   // UPSERT để tránh trùng lặp
   const { error: upsertError } = await supabase
     .from('apishopee_ads_performance_daily')
-    .upsert(upsertData, { onConflict: 'shop_id,campaign_id,performance_date' });
+    .upsert(allUpsertData, { onConflict: 'shop_id,campaign_id,performance_date' });
 
   if (upsertError) {
-    console.error('[ADS-SYNC] Upsert daily performance error:', upsertError);
-    throw new Error(`Failed to save daily performance: ${upsertError.message}`);
+    console.error(`[ADS-SYNC] Upsert daily error for ${dateStr}:`, upsertError);
   }
 
-  console.log(`[ADS-SYNC] Synced ${upsertData.length} daily performance records`);
-  return upsertData.length;
+  return allUpsertData.length;
+}
+
+/**
+ * Sync daily performance cho ngày hôm nay
+ * Wrapper function cho realtime sync
+ */
+async function syncDailyPerformance(
+  supabase: ReturnType<typeof createClient>,
+  credentials: ShopCredentials,
+  shopId: number,
+  campaigns: CampaignInfo[]
+): Promise<number> {
+  if (campaigns.length === 0) return 0;
+
+  console.log(`[ADS-SYNC] Syncing daily performance for today only (${campaigns.length} campaigns)...`);
+
+  const today = getVietnamDate();
+  const count = await syncDailyPerformanceForDate(supabase, credentials, shopId, campaigns, today);
+  
+  console.log(`[ADS-SYNC] Synced ${count} daily performance records for today`);
+  return count;
 }
 
 /**
  * Sync hourly performance cho 1 ngày cụ thể - TẤT CẢ campaigns
  * 
- * QUAN TRỌNG: Sync cho tất cả campaigns để dữ liệu tổng hợp khớp với shop-level
+ * QUAN TRỌNG: 
+ * - Sync cho tất cả campaigns để dữ liệu tổng hợp khớp với shop-level
+ * - Chia nhỏ campaigns thành batches để tránh URL quá dài (Shopee giới hạn ~2000 ký tự)
  */
 async function syncHourlyPerformanceForDate(
   supabase: ReturnType<typeof createClient>,
@@ -429,30 +439,10 @@ async function syncHourlyPerformanceForDate(
   
   console.log(`[ADS-SYNC] Syncing hourly performance for date: ${dateStr}`);
   
-  const campaignIds = campaigns.map(c => c.campaign_id).join(',');
-
-  const perfResult = await callShopeeAPI(
-    credentials,
-    shopId,
-    '/api/v2/ads/get_product_campaign_hourly_performance',
-    'GET',
-    { performance_date: dateStr, campaign_id_list: campaignIds }
-  );
-
-  if (perfResult.error) {
-    console.error(`[ADS-SYNC] Hourly performance error for ${dateStr}:`, perfResult.message || perfResult.error);
-    return 0;
-  }
-
-  const campaignPerfList = perfResult.response?.campaign_list || [];
-  if (campaignPerfList.length === 0) {
-    console.log(`[ADS-SYNC] No hourly performance data for ${dateStr}`);
-    return 0;
-  }
-
-  // Prepare upsert data
+  // QUAN TRỌNG: Chia campaigns thành batches nhỏ để tránh URL quá dài
+  const BATCH_SIZE = 50;
   const now = new Date().toISOString();
-  const upsertData: Array<{
+  const allUpsertData: Array<{
     shop_id: number;
     campaign_id: number;
     performance_date: string;
@@ -472,52 +462,79 @@ async function syncHourlyPerformanceForDate(
     synced_at: string;
   }> = [];
 
-  for (const campPerf of campaignPerfList) {
-    const metricsList = campPerf.metrics_list || [];
-    
-    for (const hourMetrics of metricsList) {
-      const expense = hourMetrics.expense || 0;
-      const broadGmv = hourMetrics.broad_gmv || 0;
-      const roas = expense > 0 ? broadGmv / expense : 0;
-      const acos = broadGmv > 0 ? (expense / broadGmv) * 100 : 0;
+  // Chia campaigns thành batches
+  for (let i = 0; i < campaigns.length; i += BATCH_SIZE) {
+    const batch = campaigns.slice(i, i + BATCH_SIZE);
+    const campaignIds = batch.map(c => c.campaign_id).join(',');
 
-      upsertData.push({
-        shop_id: shopId,
-        campaign_id: campPerf.campaign_id,
-        performance_date: dbDate,
-        hour: hourMetrics.hour,
-        impression: hourMetrics.impression || 0,
-        clicks: hourMetrics.clicks || 0,
-        ctr: hourMetrics.ctr || 0,
-        expense,
-        direct_order: hourMetrics.direct_order || 0,
-        direct_gmv: hourMetrics.direct_gmv || 0,
-        broad_order: hourMetrics.broad_order || 0,
-        broad_gmv: broadGmv,
-        direct_item_sold: hourMetrics.direct_item_sold || 0,
-        broad_item_sold: hourMetrics.broad_item_sold || 0,
-        roas,
-        acos,
-        synced_at: now,
-      });
+    const perfResult = await callShopeeAPI(
+      credentials,
+      shopId,
+      '/api/v2/ads/get_product_campaign_hourly_performance',
+      'GET',
+      { performance_date: dateStr, campaign_id_list: campaignIds }
+    );
+
+    if (perfResult.error) {
+      console.error(`[ADS-SYNC] Hourly performance error for ${dateStr} batch ${Math.floor(i / BATCH_SIZE) + 1}:`, perfResult.message || perfResult.error);
+      // Tiếp tục với batch tiếp theo
+      continue;
+    }
+
+    const campaignPerfList = perfResult.response?.campaign_list || [];
+    
+    for (const campPerf of campaignPerfList) {
+      const metricsList = campPerf.metrics_list || [];
+      
+      for (const hourMetrics of metricsList) {
+        const expense = hourMetrics.expense || 0;
+        const broadGmv = hourMetrics.broad_gmv || 0;
+        const roas = expense > 0 ? broadGmv / expense : 0;
+        const acos = broadGmv > 0 ? (expense / broadGmv) * 100 : 0;
+
+        allUpsertData.push({
+          shop_id: shopId,
+          campaign_id: campPerf.campaign_id,
+          performance_date: dbDate,
+          hour: hourMetrics.hour,
+          impression: hourMetrics.impression || 0,
+          clicks: hourMetrics.clicks || 0,
+          ctr: hourMetrics.ctr || 0,
+          expense,
+          direct_order: hourMetrics.direct_order || 0,
+          direct_gmv: hourMetrics.direct_gmv || 0,
+          broad_order: hourMetrics.broad_order || 0,
+          broad_gmv: broadGmv,
+          direct_item_sold: hourMetrics.direct_item_sold || 0,
+          broad_item_sold: hourMetrics.broad_item_sold || 0,
+          roas,
+          acos,
+          synced_at: now,
+        });
+      }
+    }
+
+    // Delay nhỏ giữa các batch để tránh rate limit
+    if (i + BATCH_SIZE < campaigns.length) {
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
 
-  if (upsertData.length === 0) {
+  if (allUpsertData.length === 0) {
     return 0;
   }
 
   // UPSERT để tránh trùng lặp - ghi đè dữ liệu cũ với GMV mới nhất
   const { error: upsertError } = await supabase
     .from('apishopee_ads_performance_hourly')
-    .upsert(upsertData, { onConflict: 'shop_id,campaign_id,performance_date,hour' });
+    .upsert(allUpsertData, { onConflict: 'shop_id,campaign_id,performance_date,hour' });
 
   if (upsertError) {
     console.error(`[ADS-SYNC] Upsert hourly performance error for ${dateStr}:`, upsertError);
     throw new Error(`Failed to save hourly performance: ${upsertError.message}`);
   }
 
-  return upsertData.length;
+  return allUpsertData.length;
 }
 
 /**
@@ -1027,7 +1044,7 @@ async function updateSyncStatus(
 
 /**
  * Main sync function - REALTIME mode (15 phút/lần)
- * Chỉ sync hôm nay để nhanh
+ * CHỈ sync ongoing campaigns để nhanh, tránh timeout
  */
 async function syncAdsData(
   supabase: ReturnType<typeof createClient>,
@@ -1050,33 +1067,30 @@ async function syncAdsData(
     // Get credentials
     const credentials = await getShopCredentials(supabase, shopId);
 
-    // Step 0: Sync shop-level performance để debug và so sánh
-    console.log('[ADS-SYNC] === SHOP-LEVEL PERFORMANCE (for comparison) ===');
-    const shopLevelDaily = await syncShopLevelDailyPerformance(supabase, credentials, shopId);
-    const shopLevelHourlyCount = await syncShopLevelHourlyPerformance(supabase, credentials, shopId);
-    console.log('[ADS-SYNC] Shop-level daily:', shopLevelDaily);
-    console.log('[ADS-SYNC] Shop-level hourly count:', shopLevelHourlyCount);
+    // Step 0: Sync shop-level performance (nhanh, không phụ thuộc số campaigns)
+    console.log('[ADS-SYNC] === SHOP-LEVEL PERFORMANCE ===');
+    await syncShopLevelDailyPerformance(supabase, credentials, shopId);
+    await syncShopLevelHourlyPerformance(supabase, credentials, shopId);
     console.log('[ADS-SYNC] === END SHOP-LEVEL ===');
 
-    // Step 1: Sync campaigns
+    // Step 1: Sync campaigns (lấy danh sách)
     await updateSyncStatus(supabase, shopId, {
       sync_progress: { step: 'syncing_campaigns', progress: 20 },
     });
-    const { total, ongoing, allCampaigns } = await syncCampaigns(supabase, credentials, shopId);
+    const { total, ongoing, ongoingCampaigns } = await syncCampaigns(supabase, credentials, shopId);
 
-    // Step 2: Sync daily performance (campaign-level) - CHO TẤT CẢ CAMPAIGNS
+    // Step 2: Sync daily performance - CHỈ ONGOING CAMPAIGNS để nhanh
     await updateSyncStatus(supabase, shopId, {
       sync_progress: { step: 'syncing_daily_performance', progress: 50 },
     });
-    // QUAN TRỌNG: Sử dụng allCampaigns thay vì chỉ ongoing campaigns
-    const dailyRecords = await syncDailyPerformance(supabase, credentials, shopId, allCampaigns);
+    // REALTIME: Chỉ sync ongoing campaigns (ít hơn nhiều)
+    const dailyRecords = await syncDailyPerformance(supabase, credentials, shopId, ongoingCampaigns);
 
-    // Step 3: Sync hourly performance (campaign-level) - CHỈ HÔM NAY (realtime mode)
+    // Step 3: Sync hourly performance - CHỈ ONGOING CAMPAIGNS
     await updateSyncStatus(supabase, shopId, {
       sync_progress: { step: 'syncing_hourly_performance', progress: 80 },
     });
-    // QUAN TRỌNG: Sử dụng allCampaigns thay vì chỉ ongoing campaigns
-    const hourlyRecords = await syncHourlyPerformance(supabase, credentials, shopId, allCampaigns);
+    const hourlyRecords = await syncHourlyPerformance(supabase, credentials, shopId, ongoingCampaigns);
 
     // Update status: completed
     await updateSyncStatus(supabase, shopId, {
@@ -1088,10 +1102,10 @@ async function syncAdsData(
       ongoing_campaigns: ongoing,
     });
 
-    console.log(`[ADS-SYNC] Sync completed for shop ${shopId}`);
+    console.log(`[ADS-SYNC] Sync completed for shop ${shopId} (${ongoing} ongoing campaigns)`);
     return {
       success: true,
-      campaigns_synced: total,
+      campaigns_synced: ongoing,
       daily_records: dailyRecords,
       hourly_records: hourlyRecords,
     };
@@ -1154,17 +1168,23 @@ async function syncAdsDataBackfill(
     });
     const { total, ongoing, allCampaigns } = await syncCampaigns(supabase, credentials, shopId);
 
+    // QUAN TRỌNG: Lọc bỏ campaigns đã ended/closed - chúng không có data mới
+    const activeCampaigns = allCampaigns.filter(c => 
+      c.status !== 'ended' && c.status !== 'closed'
+    );
+    console.log(`[ADS-SYNC] Backfill: ${allCampaigns.length} total -> ${activeCampaigns.length} active campaigns`);
+
     // Step 2: Sync daily performance (7 ngày - đã có sẵn trong function)
     await updateSyncStatus(supabase, shopId, {
       sync_progress: { step: 'backfill_daily_performance', progress: 30 },
     });
-    const dailyRecords = await syncDailyPerformance(supabase, credentials, shopId, allCampaigns);
+    const dailyRecords = await syncDailyPerformance(supabase, credentials, shopId, activeCampaigns);
 
     // Step 3: BACKFILL hourly performance (7 ngày)
     await updateSyncStatus(supabase, shopId, {
       sync_progress: { step: 'backfill_hourly_performance', progress: 50 },
     });
-    const hourlyRecords = await syncHourlyPerformanceBackfill(supabase, credentials, shopId, allCampaigns, daysBack);
+    const hourlyRecords = await syncHourlyPerformanceBackfill(supabase, credentials, shopId, activeCampaigns, daysBack);
 
     // Step 4: Sync shop-level performance
     await updateSyncStatus(supabase, shopId, {
@@ -1240,6 +1260,61 @@ serve(async (req) => {
         );
       }
 
+      case 'sync_day': {
+        // INCREMENTAL BACKFILL: Sync 1 ngày cụ thể
+        // Dùng cho cron job gọi nhiều lần, mỗi lần 1 ngày để tránh timeout
+        // days_ago: 0 = hôm nay, 1 = hôm qua, 2 = 2 ngày trước, ...
+        // use_all_campaigns: true = sync campaigns có khả năng có data (loại bỏ ended/closed)
+        const daysAgo = body.days_ago || 0;
+        const useAllCampaigns = body.use_all_campaigns || false;
+        
+        console.log(`[ADS-SYNC] === SYNC_DAY: ${daysAgo} days ago, all_campaigns=${useAllCampaigns} ===`);
+        
+        const credentials = await getShopCredentials(supabase, shop_id);
+        const { allCampaigns, ongoingCampaigns } = await syncCampaigns(supabase, credentials, shop_id);
+        
+        // Chọn campaigns để sync
+        // QUAN TRỌNG: Khi use_all_campaigns=true, chỉ sync campaigns KHÔNG phải ended/closed
+        // vì campaigns đã kết thúc sẽ không có data mới
+        let campaignsToSync: CampaignInfo[];
+        if (useAllCampaigns) {
+          // Lọc bỏ campaigns đã ended hoặc closed - chúng không có data mới
+          const activeCampaigns = allCampaigns.filter(c => 
+            c.status !== 'ended' && c.status !== 'closed'
+          );
+          console.log(`[ADS-SYNC] Filtered: ${allCampaigns.length} total -> ${activeCampaigns.length} active (excluded ${allCampaigns.length - activeCampaigns.length} ended/closed)`);
+          campaignsToSync = activeCampaigns;
+        } else {
+          campaignsToSync = ongoingCampaigns;
+        }
+        console.log(`[ADS-SYNC] Syncing ${campaignsToSync.length} campaigns`);
+        
+        const today = getVietnamDate();
+        const targetDate = new Date(today.getTime());
+        targetDate.setUTCDate(today.getUTCDate() - daysAgo);
+        
+        const dailyRecords = await syncDailyPerformanceForDate(supabase, credentials, shop_id, campaignsToSync, targetDate);
+        const hourlyRecords = await syncHourlyPerformanceForDate(supabase, credentials, shop_id, campaignsToSync, targetDate);
+        
+        // Cập nhật shop-level cho ngày đó
+        await syncShopLevelDailyPerformance(supabase, credentials, shop_id);
+        if (daysAgo === 0) {
+          await syncShopLevelHourlyPerformance(supabase, credentials, shop_id);
+        }
+        
+        return new Response(
+          JSON.stringify({
+            success: true,
+            days_ago: daysAgo,
+            date: formatDateForDB(targetDate),
+            campaigns_synced: campaignsToSync.length,
+            daily_records: dailyRecords,
+            hourly_records: hourlyRecords,
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
       case 'backfill': {
         // BACKFILL mode: Sync 7 ngày để cập nhật GMV attribution (1 lần/ngày, 2AM)
         // Lý do: Shopee có 7-day attribution window - đơn hàng hôm nay có thể
@@ -1280,7 +1355,7 @@ serve(async (req) => {
 
       default:
         return new Response(
-          JSON.stringify({ error: 'Invalid action. Use: sync, backfill, status' }),
+          JSON.stringify({ error: 'Invalid action. Use: sync, sync_day, backfill, status' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
     }

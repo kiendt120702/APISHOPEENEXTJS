@@ -152,6 +152,7 @@ export function AdsPanel({ shopId, userId }: AdsPanelProps) {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
 
   // Hook đọc data từ DB - KHÔNG gọi Shopee API trực tiếp
+  // Cron job handles sync every 15 minutes
   const {
     campaigns,
     allCampaigns, // TẤT CẢ campaigns để tính tổng performance
@@ -171,7 +172,6 @@ export function AdsPanel({ shopId, userId }: AdsPanelProps) {
     dateRange,
     selectedDate,
     statusFilter: 'ongoing',
-    autoSyncInterval: 15 * 60 * 1000, // 15 phút tự động sync
   });
 
   // Local state for hourly data (loaded on demand)
@@ -993,63 +993,24 @@ function PerformanceOverviewFromCampaigns({ campaigns, dateRange, selectedDate, 
     broad_roas: number;
   } | null;
 }) {
-  // QUAN TRỌNG: Ưu tiên sử dụng shop-level performance từ API
-  // Vì nó bao gồm TẤT CẢ loại ads (search_product, discovery, search_shop)
-  // và tất cả status (ongoing, paused, ended) có data trong ngày
+  // CHỈ lấy từ shop-level performance (từ DB)
+  // Không fallback về campaign-level để tránh dữ liệu không nhất quán
   const currentTotals = useMemo(() => {
-    // Ưu tiên shop-level performance nếu có
-    if (shopLevelPerformance && (shopLevelPerformance.impression > 0 || shopLevelPerformance.expense > 0)) {
-      return {
-        impression: shopLevelPerformance.impression,
-        clicks: shopLevelPerformance.clicks,
-        ctr: shopLevelPerformance.ctr,
-        broad_order: shopLevelPerformance.broad_order,
-        broad_item_sold: shopLevelPerformance.broad_item_sold,
-        broad_gmv: shopLevelPerformance.broad_gmv,
-        expense: shopLevelPerformance.expense,
-        broad_roas: shopLevelPerformance.broad_roas,
-      };
-    }
-
-    // Fallback: Tính từ campaigns (bao gồm tất cả status có impression > 0 hoặc expense > 0)
-    if (!campaigns || campaigns.length === 0) {
+    if (!shopLevelPerformance) {
       return { impression: 0, clicks: 0, ctr: 0, broad_order: 0, broad_item_sold: 0, broad_gmv: 0, expense: 0, broad_roas: 0 };
     }
-    
-    // Filter: Chỉ tính campaigns có data (impression > 0 OR expense > 0)
-    // Giống logic của Shopee Seller Center
-    const totals = campaigns.reduce((acc, c) => {
-      const perf = c.performance;
-      if (!perf) return acc;
-      
-      // Điều kiện: Nếu có impression HOẶC expense thì tính vào tổng
-      // Bỏ qua status - campaign paused/ended vẫn được tính nếu có data
-      if ((perf.impression || 0) === 0 && (perf.expense || 0) === 0) {
-        return acc;
-      }
-      
-      return {
-        impression: acc.impression + (perf.impression || 0),
-        clicks: acc.clicks + (perf.clicks || 0),
-        ctr: 0,
-        broad_order: acc.broad_order + (perf.orders || 0),
-        broad_item_sold: 0, // Không có trong campaign performance
-        broad_gmv: acc.broad_gmv + (perf.gmv || 0),
-        expense: acc.expense + (perf.expense || 0),
-        broad_roas: 0,
-      };
-    }, { impression: 0, clicks: 0, ctr: 0, broad_order: 0, broad_item_sold: 0, broad_gmv: 0, expense: 0, broad_roas: 0 });
 
-    // Calculate derived metrics
-    if (totals.impression > 0) {
-      totals.ctr = (totals.clicks / totals.impression) * 100;
-    }
-    if (totals.expense > 0) {
-      totals.broad_roas = totals.broad_gmv / totals.expense;
-    }
-
-    return totals;
-  }, [campaigns, shopLevelPerformance]);
+    return {
+      impression: shopLevelPerformance.impression,
+      clicks: shopLevelPerformance.clicks,
+      ctr: shopLevelPerformance.ctr,
+      broad_order: shopLevelPerformance.broad_order,
+      broad_item_sold: shopLevelPerformance.broad_item_sold,
+      broad_gmv: shopLevelPerformance.broad_gmv,
+      expense: shopLevelPerformance.expense,
+      broad_roas: shopLevelPerformance.broad_roas,
+    };
+  }, [shopLevelPerformance]);
 
   const formatCompact = (v: number) => {
     if (v >= 1000000) return (v / 1000000).toFixed(1) + 'm';

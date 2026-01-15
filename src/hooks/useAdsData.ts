@@ -10,7 +10,7 @@
  * QUAN TRỌNG: Frontend KHÔNG gọi Shopee API trực tiếp, chỉ đọc từ DB!
  */
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 
@@ -108,7 +108,6 @@ export interface UseAdsDataOptions {
   dateRange?: 'today' | '7days' | '30days';
   selectedDate?: Date;
   statusFilter?: 'ongoing' | 'all';
-  autoSyncInterval?: number; // milliseconds, default 15 minutes (0 = disabled)
 }
 
 export interface UseAdsDataReturn {
@@ -214,15 +213,12 @@ export function useAdsData(
     dateRange = 'today',
     selectedDate = new Date(),
     statusFilter = 'ongoing',
-    autoSyncInterval = 15 * 60 * 1000, // 15 minutes default
   } = options;
 
   const queryClient = useQueryClient();
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<AdsSyncStatus | null>(null);
   const [hourlyData, setHourlyData] = useState<Record<number, AdsPerformanceHourly[]>>({});
-  const lastSyncRef = useRef<number>(0);
-  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Query keys
   const campaignsQueryKey = ['ads-campaigns', shopId, statusFilter];
@@ -404,10 +400,10 @@ export function useAdsData(
     queryKey: campaignsQueryKey,
     queryFn: fetchCampaigns,
     enabled: !!shopId && !!userId,
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 10 * 60 * 1000,
+    staleTime: Infinity, // Never stale - only refetch when invalidated by realtime
+    gcTime: 30 * 60 * 1000, // Keep in cache for 30 minutes
     refetchOnWindowFocus: false,
-    refetchOnMount: 'always',
+    refetchOnMount: false, // Don't refetch on mount if data exists
   });
 
   // ALL Campaigns query (để tính tổng performance)
@@ -418,10 +414,10 @@ export function useAdsData(
     queryKey: allCampaignsQueryKey,
     queryFn: fetchAllCampaigns,
     enabled: !!shopId && !!userId,
-    staleTime: 2 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
-    refetchOnMount: 'always',
+    refetchOnMount: false,
   });
 
   // Performance query
@@ -435,10 +431,10 @@ export function useAdsData(
     queryKey: performanceQueryKey,
     queryFn: fetchDailyPerformance,
     enabled: !!shopId && !!userId,
-    staleTime: 2 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
-    refetchOnMount: 'always',
+    refetchOnMount: false,
   });
 
   // Previous period performance query (for comparison)
@@ -448,25 +444,28 @@ export function useAdsData(
     queryKey: prevPerformanceQueryKey,
     queryFn: fetchPreviousPerformance,
     enabled: !!shopId && !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes - less frequent updates for historical data
-    gcTime: 15 * 60 * 1000,
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
-    refetchOnMount: 'always',
+    refetchOnMount: false,
   });
 
   // Shop-level performance query (tổng tất cả ads - chính xác hơn)
+  // QUAN TRỌNG: Đây là nguồn dữ liệu chính cho Overview vì bao gồm TẤT CẢ loại ads
   const shopLevelQueryKey = ['ads-shop-level', shopId, dateRange, formatDateForDB(selectedDate)];
   const {
     data: shopLevelData,
+    isLoading: shopLevelLoading,
+    isFetching: shopLevelFetching,
     refetch: refetchShopLevel,
   } = useQuery({
     queryKey: shopLevelQueryKey,
     queryFn: fetchShopLevelPerformance,
     enabled: !!shopId && !!userId,
-    staleTime: 2 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
-    refetchOnMount: 'always',
+    refetchOnMount: false,
   });
 
   // ==================== COMBINE DATA ====================
@@ -585,13 +584,13 @@ export function useAdsData(
 
       const result = res.data;
       if (result.success) {
-        lastSyncRef.current = Date.now();
         await fetchSyncStatus();
         
         // Invalidate queries to trigger refetch
         queryClient.invalidateQueries({ queryKey: campaignsQueryKey });
         queryClient.invalidateQueries({ queryKey: performanceQueryKey });
         queryClient.invalidateQueries({ queryKey: prevPerformanceQueryKey });
+        queryClient.invalidateQueries({ queryKey: shopLevelQueryKey }); // QUAN TRỌNG: Invalidate shop-level để overview cập nhật
 
         return {
           success: true,
@@ -628,13 +627,13 @@ export function useAdsData(
 
       const result = res.data;
       if (result.success) {
-        lastSyncRef.current = Date.now();
         await fetchSyncStatus();
         
         // Invalidate queries to trigger refetch
         queryClient.invalidateQueries({ queryKey: campaignsQueryKey });
         queryClient.invalidateQueries({ queryKey: performanceQueryKey });
         queryClient.invalidateQueries({ queryKey: prevPerformanceQueryKey });
+        queryClient.invalidateQueries({ queryKey: shopLevelQueryKey }); // QUAN TRỌNG: Invalidate shop-level để overview cập nhật
 
         return {
           success: true,
@@ -720,66 +719,8 @@ export function useAdsData(
     setHourlyData({});
   }, [selectedDate, dateRange]);
 
-  // Auto-sync interval - Gọi Edge Function để sync từ Shopee API
-  useEffect(() => {
-    if (!shopId || !userId || autoSyncInterval <= 0) return;
-
-    const checkAndSync = async () => {
-      // Không sync nếu đang syncing
-      if (syncing) {
-        console.log('[useAdsData] Skip auto-sync: already syncing');
-        return;
-      }
-
-      const now = Date.now();
-      
-      // Get last sync time from status or ref
-      let lastSync = lastSyncRef.current;
-      if (lastSync === 0 && syncStatus?.last_sync_at) {
-        lastSync = new Date(syncStatus.last_sync_at).getTime();
-        lastSyncRef.current = lastSync;
-      }
-
-      const timeSinceLastSync = now - lastSync;
-      console.log(`[useAdsData] Time since last sync: ${Math.round(timeSinceLastSync / 1000)}s, interval: ${autoSyncInterval / 1000}s`);
-
-      // Only sync if interval has passed (or never synced)
-      if (lastSync === 0 || timeSinceLastSync >= autoSyncInterval) {
-        console.log('[useAdsData] Auto-syncing ads data via Edge Function');
-        try {
-          const res = await supabase.functions.invoke('apishopee-ads-sync', {
-            body: { action: 'sync', shop_id: shopId },
-          });
-
-          if (res.error) {
-            console.error('[useAdsData] Auto-sync error:', res.error);
-          } else if (res.data?.success) {
-            lastSyncRef.current = Date.now();
-            console.log('[useAdsData] Auto-sync completed:', res.data);
-            // Refetch data
-            queryClient.invalidateQueries({ queryKey: campaignsQueryKey });
-            queryClient.invalidateQueries({ queryKey: performanceQueryKey });
-            fetchSyncStatus();
-          }
-        } catch (err) {
-          console.error('[useAdsData] Auto-sync exception:', err);
-        }
-      }
-    };
-
-    // Check after 5 seconds to allow initial load
-    const timeoutId = setTimeout(checkAndSync, 5000);
-
-    // Set up interval to check every minute (but only sync if interval passed)
-    syncIntervalRef.current = setInterval(checkAndSync, 60 * 1000);
-
-    return () => {
-      clearTimeout(timeoutId);
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-      }
-    };
-  }, [shopId, userId, autoSyncInterval, syncing, syncStatus?.last_sync_at, queryClient, campaignsQueryKey, performanceQueryKey, fetchSyncStatus]);
+  // REMOVED: Auto-sync interval - Cron job handles sync from Shopee API
+  // Realtime subscription handles UI updates when DB changes
 
   // ==================== REALTIME SUBSCRIPTION ====================
 
@@ -858,9 +799,9 @@ export function useAdsData(
     hourlyData,
     syncStatus,
     shopLevelPerformance: shopLevelData || null,
-    loading: (campaignsLoading || performanceLoading) && !campaignsData,
+    loading: (campaignsLoading || performanceLoading || shopLevelLoading) && !campaignsData,
     syncing,
-    isFetching: campaignsFetching || performanceFetching,
+    isFetching: campaignsFetching || performanceFetching || shopLevelFetching,
     error: campaignsError?.message || performanceError?.message || null,
     refetch,
     syncFromAPI,

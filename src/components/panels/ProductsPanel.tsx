@@ -1,9 +1,11 @@
 /**
  * ProductsPanel - UI component cho quản lý sản phẩm Shopee
- * Đọc dữ liệu từ database, sync tự động mỗi giờ
+ * Đọc dữ liệu từ database, sync tự động mỗi giờ bởi cron job
+ * Sử dụng React Query để cache data, chỉ reload khi DB thay đổi
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, Search, Package, ChevronDown, ChevronUp, Link2, Clock, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -87,73 +89,140 @@ function formatRelativeTime(dateStr: string): string {
   return `${diffDays} ngày trước`;
 }
 
-// Sync interval: 1 hour
-const SYNC_INTERVAL_MS = 60 * 60 * 1000;
-
 export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  // State
-  const [products, setProducts] = useState<DBProduct[]>([]);
-  const [models, setModels] = useState<Record<number, DBModel[]>>({});
-  const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  // Local state
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  
-  // Ref for auto-sync interval
-  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
+  // Query keys
+  const productsQueryKey = ['products', shopId];
+  const modelsQueryKey = ['product-models', shopId];
+  const syncStatusQueryKey = ['products-sync-status', shopId];
 
-  // Load products từ database
-  const loadFromDatabase = useCallback(async () => {
-    setLoading(true);
-    try {
-      // Load products - không filter theo user_id vì dữ liệu thuộc về shop
-      const { data: productData, error: productError } = await supabase
+  // Fetch products từ database với React Query (cache vĩnh viễn cho đến khi invalidate)
+  const { data: products = [], isLoading: loadingProducts } = useQuery({
+    queryKey: productsQueryKey,
+    queryFn: async (): Promise<DBProduct[]> => {
+      const { data, error } = await supabase
         .from('apishopee_products')
         .select('id, item_id, item_name, item_sku, item_status, category_id, image_url_list, current_price, original_price, total_available_stock, brand_id, brand_name, has_model, create_time, update_time, synced_at')
         .eq('shop_id', shopId)
         .order('update_time', { ascending: false });
 
-      if (productError) throw productError;
-      setProducts(productData || []);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!shopId,
+    staleTime: Infinity, // Không bao giờ stale - chỉ refetch khi invalidate
+    gcTime: 30 * 60 * 1000, // Cache 30 phút
+    refetchOnWindowFocus: false, // Không refetch khi focus window
+    refetchOnMount: false, // Không refetch khi mount lại
+    refetchOnReconnect: false, // Không refetch khi reconnect
+  });
 
-      // Load models - không filter theo user_id
-      const { data: modelData, error: modelError } = await supabase
+  // Fetch models từ database
+  const { data: modelsData = {}, isLoading: loadingModels } = useQuery({
+    queryKey: modelsQueryKey,
+    queryFn: async (): Promise<Record<number, DBModel[]>> => {
+      const { data, error } = await supabase
         .from('apishopee_product_models')
         .select('id, item_id, model_id, model_sku, model_name, current_price, original_price, total_available_stock, image_url, tier_index')
         .eq('shop_id', shopId);
 
-      if (modelError) throw modelError;
+      if (error) throw error;
 
       // Group models by item_id
       const modelsByItem: Record<number, DBModel[]> = {};
-      (modelData || []).forEach(m => {
+      (data || []).forEach(m => {
         if (!modelsByItem[m.item_id]) modelsByItem[m.item_id] = [];
         modelsByItem[m.item_id].push(m);
       });
-      setModels(modelsByItem);
+      return modelsByItem;
+    },
+    enabled: !!shopId,
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+  });
 
-      // Get last sync time - không filter theo user_id
-      const { data: syncStatus } = await supabase
+  // Fetch sync status
+  const { data: syncStatus } = useQuery({
+    queryKey: syncStatusQueryKey,
+    queryFn: async () => {
+      const { data } = await supabase
         .from('apishopee_sync_status')
         .select('products_synced_at')
         .eq('shop_id', shopId)
         .maybeSingle();
+      return data;
+    },
+    enabled: !!shopId,
+    staleTime: 60 * 1000, // 1 phút
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+  });
 
-      setLastSyncedAt(syncStatus?.products_synced_at || null);
+  const lastSyncedAt = syncStatus?.products_synced_at || null;
+  const loading = loadingProducts || loadingModels;
 
-    } catch (err) {
-      console.error('Load from DB error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [shopId]);
+  // Subscribe to realtime changes - chỉ invalidate khi có thay đổi thực sự
+  useEffect(() => {
+    if (!shopId) return;
 
-  // Sync products từ Shopee API
-  const syncProducts = useCallback(async (showToast = true) => {
+    const channel = supabase
+      .channel(`products_${shopId}_${Date.now()}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'apishopee_products',
+          filter: `shop_id=eq.${shopId}`,
+        },
+        () => {
+          // Chỉ invalidate khi có thay đổi từ DB
+          queryClient.invalidateQueries({ queryKey: productsQueryKey });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'apishopee_product_models',
+          filter: `shop_id=eq.${shopId}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: modelsQueryKey });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'apishopee_sync_status',
+          filter: `shop_id=eq.${shopId}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: syncStatusQueryKey });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [shopId, queryClient, productsQueryKey, modelsQueryKey, syncStatusQueryKey]);
+
+  // Sync products từ Shopee API (chạy background, không block UI)
+  const syncProducts = async () => {
     if (syncing) return;
     
     setSyncing(true);
@@ -169,89 +238,29 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
 
-      // Reload from database
-      await loadFromDatabase();
+      // Invalidate queries để refresh data
+      await queryClient.invalidateQueries({ queryKey: productsQueryKey });
+      await queryClient.invalidateQueries({ queryKey: modelsQueryKey });
+      await queryClient.invalidateQueries({ queryKey: syncStatusQueryKey });
 
-      if (showToast) {
-        toast({
-          title: 'Đồng bộ thành công',
-          description: `Đã đồng bộ ${data?.synced_count || 0} sản phẩm`,
-        });
-      }
+      toast({
+        title: 'Đồng bộ thành công',
+        description: `Đã đồng bộ ${data?.synced_count || 0} sản phẩm`,
+      });
     } catch (err) {
-      if (showToast) {
-        toast({
-          title: 'Lỗi đồng bộ',
-          description: (err as Error).message,
-          variant: 'destructive',
-        });
-      }
+      toast({
+        title: 'Lỗi đồng bộ',
+        description: (err as Error).message,
+        variant: 'destructive',
+      });
     } finally {
       setSyncing(false);
     }
-  }, [shopId, userId, syncing, loadFromDatabase, toast]);
+  };
 
-  // Check for updates (gọi mỗi giờ)
-  const checkForUpdates = useCallback(async () => {
-    try {
-      console.log('[ProductsPanel] Checking for updates...');
-      const { data, error } = await supabase.functions.invoke('apishopee-product', {
-        body: {
-          action: 'check-updates',
-          shop_id: shopId,
-          user_id: userId,
-        },
-      });
-
-      if (error) throw error;
-      
-      if (data?.synced_count > 0) {
-        // Có cập nhật -> reload từ database
-        await loadFromDatabase();
-        toast({
-          title: 'Cập nhật tự động',
-          description: `Đã cập nhật ${data.synced_count} sản phẩm`,
-        });
-      }
-    } catch (err) {
-      console.error('[ProductsPanel] Check updates error:', err);
-    }
-  }, [shopId, userId, loadFromDatabase, toast]);
-
-  // Initial load và setup auto-sync
+  // Reset expanded items khi shop thay đổi
   useEffect(() => {
-    // Tạo abort controller để cancel request khi unmount
-    const abortController = new AbortController();
-    
-    const doLoad = async () => {
-      if (!abortController.signal.aborted) {
-        await loadFromDatabase();
-      }
-    };
-    
-    doLoad();
-
-    // Setup auto-sync interval (mỗi 1 giờ)
-    syncIntervalRef.current = setInterval(() => {
-      if (!abortController.signal.aborted) {
-        checkForUpdates();
-      }
-    }, SYNC_INTERVAL_MS);
-
-    return () => {
-      abortController.abort();
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-      }
-    };
-  }, [shopId]); // Chỉ depend vào shopId
-
-  // Reset khi shop thay đổi
-  useEffect(() => {
-    setProducts([]);
-    setModels({});
     setExpandedItems(new Set());
-    setLastSyncedAt(null);
   }, [shopId]);
 
   // Filter products theo search term
@@ -277,11 +286,6 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
       }
       return next;
     });
-  };
-
-  // Handle manual refresh
-  const handleRefresh = () => {
-    syncProducts(true);
   };
 
   // Số lượng model hiển thị mặc định
@@ -321,7 +325,7 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleRefresh}
+              onClick={syncProducts}
               disabled={loading || syncing}
             >
               <RefreshCw className={cn("h-4 w-4 mr-2", (loading || syncing) && "animate-spin")} />
@@ -358,7 +362,7 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
           <div className="flex flex-col items-center justify-center py-12 text-slate-400">
             <Package className="h-12 w-12 mb-3" />
             <p className="mb-4">Chưa có dữ liệu sản phẩm</p>
-            <Button onClick={handleRefresh} variant="outline" size="sm">
+            <Button onClick={syncProducts} variant="outline" size="sm">
               <RefreshCw className="h-4 w-4 mr-2" />
               Đồng bộ ngay
             </Button>
@@ -368,7 +372,7 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
         {/* Product List */}
         {filteredProducts.map((product) => {
           const isExpanded = expandedItems.has(product.item_id);
-          const productModels = models[product.item_id] || [];
+          const productModels = modelsData[product.item_id] || [];
           const visibleModels = productModels.slice(0, isExpanded ? undefined : DEFAULT_VISIBLE_MODELS);
           const hasMoreModels = productModels.length > DEFAULT_VISIBLE_MODELS;
           const remainingModels = productModels.length - DEFAULT_VISIBLE_MODELS;

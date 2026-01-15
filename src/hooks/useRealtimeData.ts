@@ -92,9 +92,9 @@ export function useRealtimeData<T>(
     staleTime,
     gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
     refetchOnWindowFocus: false, // Don't refetch when tab becomes active
-    refetchOnMount: 'always', // Always refetch on mount to ensure fresh data
+    refetchOnMount: false, // Don't refetch on mount if data exists in cache
     refetchInterval: refetchInterval, // Auto refetch at specified interval
-    refetchIntervalInBackground: true, // Continue refetching even when tab is not focused
+    refetchIntervalInBackground: false, // Don't refetch when tab is not focused
     retry: 2, // Retry failed requests
     retryDelay: 1000, // Wait 1 second between retries
   });
@@ -112,13 +112,13 @@ export function useRealtimeData<T>(
           queryKey: ['realtime', tableName, prevShopIdRef.current, userId]
         });
         prevShopIdRef.current = shopId;
+        
+        // Invalidate và refetch data cho shop mới
+        queryClient.invalidateQueries({ 
+          queryKey: ['realtime', tableName, shopId, userId],
+          refetchType: 'active'
+        });
       }
-      
-      // Invalidate và refetch data cho shop mới
-      queryClient.invalidateQueries({ 
-        queryKey: ['realtime', tableName, shopId, userId],
-        refetchType: 'active'
-      });
     }
   }, [shopId, userId, enabled, tableName, queryClient]);
 
@@ -172,7 +172,8 @@ export function useRealtimeData<T>(
 
 /**
  * Specialized hook for Flash Sale data
- * Auto-refreshes every 1 hour to get latest data from database
+ * Data is synced by cron job every 30 minutes
+ * Realtime subscription handles UI updates when DB changes
  */
 export function useFlashSaleData(shopId: number, userId: string) {
   return useRealtimeData<{
@@ -196,8 +197,8 @@ export function useFlashSaleData(shopId: number, userId: string) {
   }>('apishopee_flash_sale_data', shopId, userId, {
     orderBy: 'start_time',
     orderAsc: false,
-    staleTime: 2 * 60 * 1000, // Flash sale data stale after 2 minutes
-    refetchInterval: 60 * 60 * 1000, // Auto refetch every 1 hour (60 minutes)
+    staleTime: Infinity, // Never stale - only refetch when invalidated by realtime
+    refetchInterval: false, // Disabled - cron job handles sync
   });
 }
 
@@ -246,16 +247,15 @@ export interface UseReviewsDataReturn {
 }
 
 /**
- * Specialized hook for Reviews data with auto-sync every 30 minutes
+ * Specialized hook for Reviews data
  * - Realtime subscription for instant UI updates when DB changes
- * - Auto-sync from Shopee API every 30 minutes
+ * - Cron job handles sync from Shopee API
  * - Enriches reviews with product info
  */
 export function useReviewsData(shopId: number, userId: string): UseReviewsDataReturn {
   const queryClient = useQueryClient();
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<ReviewSyncStatus | null>(null);
-  const lastSyncRef = useRef<number>(0);
 
   // Query key for reviews
   const queryKey = ['reviews', shopId, userId];
@@ -325,7 +325,6 @@ export function useReviewsData(shopId: number, userId: string): UseReviewsDataRe
 
       const result = res.data;
       if (result.success) {
-        lastSyncRef.current = Date.now();
         await fetchSyncStatus();
         // Invalidate cache to trigger refetch
         queryClient.invalidateQueries({ queryKey });
@@ -349,10 +348,10 @@ export function useReviewsData(shopId: number, userId: string): UseReviewsDataRe
     queryKey,
     queryFn: fetchReviews,
     enabled: !!shopId && !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000,
+    staleTime: Infinity, // Never stale - only refetch when invalidated by realtime
+    gcTime: 30 * 60 * 1000, // Keep in cache for 30 minutes
     refetchOnWindowFocus: false,
-    refetchOnMount: 'always',
+    refetchOnMount: false, // Don't refetch on mount if data exists
   });
 
   // Fetch sync status on mount and when shopId changes
@@ -362,48 +361,8 @@ export function useReviewsData(shopId: number, userId: string): UseReviewsDataRe
     }
   }, [shopId, userId, fetchSyncStatus]);
 
-  // Auto-sync every 30 minutes
-  useEffect(() => {
-    if (!shopId || !userId) return;
-
-    const SYNC_INTERVAL = 30 * 60 * 1000; // 30 minutes
-
-    const checkAndSync = async () => {
-      // Đợi có syncStatus trước khi check
-      if (!syncStatus) return;
-      
-      // Nếu chưa initial sync done, không auto-sync ở đây (để ReviewsPanel handle)
-      if (!syncStatus.is_initial_sync_done) return;
-      
-      const now = Date.now();
-      
-      // Lấy thời gian sync cuối từ syncStatus nếu lastSyncRef chưa được set
-      let lastSync = lastSyncRef.current;
-      if (lastSync === 0 && syncStatus.last_sync_at) {
-        lastSync = new Date(syncStatus.last_sync_at).getTime();
-        lastSyncRef.current = lastSync;
-      }
-      
-      const timeSinceLastSync = now - lastSync;
-      
-      // Only sync if 30 minutes have passed since last sync
-      if (timeSinceLastSync >= SYNC_INTERVAL && !syncing) {
-        console.log('[useReviewsData] Auto-syncing reviews (30 min interval)');
-        await syncReviews();
-      }
-    };
-
-    // Check sau 2 giây để đợi syncStatus load xong
-    const timeoutId = setTimeout(checkAndSync, 2000);
-
-    // Set up interval
-    const intervalId = setInterval(checkAndSync, SYNC_INTERVAL);
-
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(intervalId);
-    };
-  }, [shopId, userId, syncing, syncReviews, syncStatus]);
+  // REMOVED: Auto-sync interval - cron job handles this now
+  // Realtime subscription handles UI updates when DB changes
 
   // Realtime subscription for instant UI updates
   useEffect(() => {
