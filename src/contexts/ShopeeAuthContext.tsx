@@ -280,6 +280,7 @@ export function ShopeeAuthProvider({ children }: { children: ReactNode }) {
         try {
           const { data: { user } } = await supabase.auth.getUser();
           if (user && newToken.shop_id && newToken.access_token && newToken.refresh_token) {
+            // Bước 1: Lưu shop và token vào database
             await saveUserShop(
               user.id,
               newToken.shop_id,
@@ -293,22 +294,34 @@ export function ShopeeAuthProvider({ children }: { children: ReactNode }) {
 
             console.log('[AUTH] Shop and token saved to database');
 
+            // Bước 2: Fetch và lưu thông tin shop (tên, logo) từ Shopee API
+            // Đợi 1s để đảm bảo shop record đã được tạo trong database
+            // và access_token đã được propagate qua Supabase
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
             try {
+              console.log('[AUTH] Fetching shop info for shop_id:', newToken.shop_id);
               const { data, error } = await supabase.functions.invoke('shopee-shop', {
                 body: { action: 'get-full-info', shop_id: newToken.shop_id, force_refresh: true },
               });
               
               if (error) {
-                console.warn('[AUTH] Failed to fetch shop info:', error);
+                console.error('[AUTH] ❌ Failed to fetch shop info (edge function error):', error);
+              } else if (data?.debug?.hasInfoError) {
+                // Shopee API returned error
+                console.error('[AUTH] ❌ Shopee API error:', data.debug.infoErrorValue, data.debug.infoErrorMessage);
+                console.warn('[AUTH] This may be normal for newly authorized shops - try refreshing later');
+              } else if (data?.info?.shop_name) {
+                console.log('[AUTH] ✅ Shop info fetched and saved:', data.info.shop_name);
               } else {
-                console.log('[AUTH] Shop info fetched successfully:', data?.info?.shop_name);
+                console.warn('[AUTH] ⚠️ Shop info fetched but no shop_name. Debug:', JSON.stringify(data?.debug));
               }
             } catch (err) {
-              console.warn('[AUTH] Error fetching shop info:', err);
+              console.error('[AUTH] ❌ Error fetching shop info:', err);
             }
           }
         } catch (err) {
-          console.warn('[AUTH] Error saving shop to database:', err);
+          console.error('[AUTH] Error saving shop to database:', err);
         }
 
         sessionStorage.removeItem('shopee_partner_info');

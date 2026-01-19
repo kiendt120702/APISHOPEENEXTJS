@@ -43,14 +43,12 @@ async function getPartnerCredentials(
     .single();
 
   if (data?.partner_id && data?.partner_key && !error) {
-    console.log('[PARTNER] Using partner from shop:', data.partner_id);
     return {
       partnerId: data.partner_id,
       partnerKey: data.partner_key,
     };
   }
 
-  console.log('[PARTNER] Using default partner from env:', DEFAULT_PARTNER_ID);
   return {
     partnerId: DEFAULT_PARTNER_ID,
     partnerKey: DEFAULT_PARTNER_KEY,
@@ -63,7 +61,6 @@ async function getPartnerCredentials(
 async function fetchWithProxy(targetUrl: string, options: RequestInit): Promise<Response> {
   if (PROXY_URL) {
     const proxyUrl = `${PROXY_URL}?url=${encodeURIComponent(targetUrl)}`;
-    console.log('[PROXY] Calling via proxy:', PROXY_URL);
     return await fetch(proxyUrl, options);
   }
   return await fetch(targetUrl, options);
@@ -129,7 +126,6 @@ async function saveToken(
   );
 
   if (error) {
-    console.error('Failed to save token:', error);
     throw error;
   }
 }
@@ -184,7 +180,6 @@ async function callShopeeAPIWithRetry(
     }
 
     const url = `${SHOPEE_BASE_URL}${path}?${params.toString()}`;
-    console.log('Calling Shopee API:', path);
 
     const options: RequestInit = {
       method,
@@ -202,8 +197,6 @@ async function callShopeeAPIWithRetry(
   let result = await makeRequest(token.access_token);
 
   if (result.error === 'error_auth' || result.message?.includes('Invalid access_token')) {
-    console.log('[AUTO-RETRY] Invalid token detected, refreshing...');
-
     const newToken = await refreshAccessToken(credentials, token.refresh_token, shopId);
 
     if (!newToken.error) {
@@ -274,11 +267,9 @@ async function getCachedShopInfo(
 
   // Chỉ dùng cache nếu đã có shop_name và cache chưa quá 30 phút
   if (!data.shop_name || (now - updatedAt > CACHE_TTL_MS)) {
-    console.log('[CACHE] Cache expired or no shop_name for shop:', shopId);
     return null;
   }
 
-  console.log('[CACHE] Cache hit for shop:', shopId);
   return data as ShopCacheData;
 }
 
@@ -293,6 +284,12 @@ async function saveShopInfoCache(
   const region = shopInfo.region as string || null;
   const description = (shopProfile.response as Record<string, unknown>)?.description as string || null;
 
+  // Nếu không có shop_name, không cần cập nhật (API có thể trả về lỗi)
+  if (!shopName && !shopInfo.auth_time && !shopInfo.expire_time) {
+    return;
+  }
+
+  // Build update data object
   const updateData: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   };
@@ -302,7 +299,7 @@ async function saveShopInfoCache(
   if (shopLogo) updateData.shop_logo = shopLogo;
   if (region) updateData.region = region;
   if (description) updateData.description = description;
-  if (shopInfo.status !== undefined) updateData.status = shopInfo.status;
+  if (shopInfo.status !== undefined && shopInfo.status !== '') updateData.status = shopInfo.status;
   if (shopInfo.is_cb !== undefined) updateData.is_cb = shopInfo.is_cb;
   if (shopInfo.is_sip !== undefined) updateData.is_sip = shopInfo.is_sip;
   if (shopInfo.is_upgraded_cbsc !== undefined) updateData.is_upgraded_cbsc = shopInfo.is_upgraded_cbsc;
@@ -319,15 +316,41 @@ async function saveShopInfoCache(
   if (shopInfo.auth_time !== undefined) updateData.auth_time = shopInfo.auth_time;
   if (shopInfo.expire_time !== undefined) updateData.expire_time = shopInfo.expire_time;
 
-  const { error } = await supabase
+  // Thử UPDATE trước (shop đã tồn tại từ OAuth callback)
+  const { data: updateResult, error: updateError } = await supabase
     .from('apishopee_shops')
     .update(updateData)
-    .eq('shop_id', shopId);
+    .eq('shop_id', shopId)
+    .select('shop_id, shop_name, shop_logo, auth_time, expire_time');
 
-  if (error) {
-    console.error('[CACHE] Failed to update shops:', error);
-  } else {
-    console.log('[CACHE] Updated shops table for shop:', shopId, 'with name:', shopName);
+  if (updateError) {
+    // Fallback to UPSERT nếu UPDATE fail
+    const upsertData = {
+      shop_id: shopId,
+      ...updateData,
+    };
+    
+    await supabase
+      .from('apishopee_shops')
+      .upsert(upsertData, { 
+        onConflict: 'shop_id',
+        ignoreDuplicates: false,
+      })
+      .select('shop_id, shop_name, shop_logo, auth_time, expire_time');
+  } else if (!updateResult || updateResult.length === 0) {
+    // Shop không tồn tại, cần tạo mới bằng UPSERT
+    const upsertData = {
+      shop_id: shopId,
+      ...updateData,
+    };
+    
+    await supabase
+      .from('apishopee_shops')
+      .upsert(upsertData, { 
+        onConflict: 'shop_id',
+        ignoreDuplicates: false,
+      })
+      .select('shop_id, shop_name, shop_logo, auth_time, expire_time');
   }
 }
 
@@ -390,7 +413,12 @@ serve(async (req) => {
       });
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
 
     let result;
 
@@ -420,14 +448,30 @@ serve(async (req) => {
         const infoResult = shopInfo as Record<string, unknown>;
         const profileResult = shopProfile as Record<string, unknown>;
 
-        if (!infoResult.error) {
-          await saveShopInfoCache(supabase, shop_id, infoResult, profileResult);
+        // Shopee API trả về error = "" khi thành công, chỉ kiểm tra error có giá trị thật không
+        const hasInfoError = infoResult.error && infoResult.error !== '';
+        const hasProfileError = profileResult.error && profileResult.error !== '';
+        
+        // Luôn cố gắng lưu nếu có bất kỳ dữ liệu hữu ích nào
+        if (!hasInfoError && (infoResult.shop_name || infoResult.auth_time || infoResult.expire_time)) {
+          await saveShopInfoCache(supabase, shop_id, infoResult, hasProfileError ? {} : profileResult);
         }
 
         result = {
           info: shopInfo,
           profile: shopProfile,
           cached: false,
+          debug: {
+            hasInfoError,
+            hasProfileError,
+            infoErrorValue: infoResult.error,
+            infoErrorMessage: infoResult.message,
+            profileErrorValue: profileResult.error,
+            shopName: infoResult.shop_name,
+            authTime: infoResult.auth_time,
+            expireTime: infoResult.expire_time,
+            profileShopLogo: (profileResult.response as Record<string, unknown>)?.shop_logo,
+          },
         };
         break;
       }
@@ -497,8 +541,9 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    console.error('Error:', error);
-    return new Response(JSON.stringify({ error: (error as Error).message }), {
+    return new Response(JSON.stringify({ 
+      error: (error as Error).message,
+    }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

@@ -133,11 +133,8 @@ export function ShopManagementPanel({ readOnly = false }: ShopManagementPanelPro
     const effectiveUserId = userId || user?.id;
     
     if (!effectiveUserId) {
-      console.log('[SHOPS] No user ID, skipping load');
       return;
     }
-
-    console.log('[SHOPS] Loading shops for user:', effectiveUserId);
     setLoading(true);
     try {
       // Query shop_members với role info và join luôn shops data
@@ -153,14 +150,10 @@ export function ShopManagementPanel({ readOnly = false }: ShopManagementPanelPro
         .eq('is_active', true);
 
       if (memberError) {
-        console.error('[SHOPS] Error loading shops:', memberError);
         throw memberError;
       }
 
-      console.log('[SHOPS] Raw member data:', memberData);
-
       if (!memberData || memberData.length === 0) {
-        console.log('[SHOPS] No shops found for user');
         setShops([]);
         setLoading(false);
         return;
@@ -179,11 +172,9 @@ export function ShopManagementPanel({ readOnly = false }: ShopManagementPanelPro
           };
         });
 
-      console.log('[SHOPS] Loaded', shopsWithRole.length, 'shops:', shopsWithRole.map(s => ({ id: s.shop_id, name: s.shop_name })));
       setShops(shopsWithRole);
-      setLoading(false); // Set loading false ngay sau khi có data
+      setLoading(false);
     } catch (err) {
-      console.error('[SHOPS] Error loading shops:', err);
       toast({
         title: 'Lỗi',
         description: 'Không thể tải danh sách shop',
@@ -202,7 +193,7 @@ export function ShopManagementPanel({ readOnly = false }: ShopManagementPanelPro
       setSearchParams(searchParams, { replace: true });
       // Reset loaded flag và trigger reload ngay lập tức
       hasLoadedRef.current = false;
-      fetchedExpireTimeRef.current = new Set();
+      fetchedShopInfoRef.current = new Set();
       // Trigger reload nếu đã có user
       const userId = authUser?.id || user?.id;
       if (userId && !isAnyAuthLoading) {
@@ -215,7 +206,7 @@ export function ShopManagementPanel({ readOnly = false }: ShopManagementPanelPro
   // Reset hasLoadedRef when component mounts (fixes tab switching issue)
   useEffect(() => {
     hasLoadedRef.current = false;
-    fetchedExpireTimeRef.current = new Set();
+    fetchedShopInfoRef.current = new Set();
   }, []);
 
   useEffect(() => {
@@ -223,25 +214,15 @@ export function ShopManagementPanel({ readOnly = false }: ShopManagementPanelPro
     // vì AuthContext đã được init trước và stable hơn
     const userId = authUser?.id || user?.id;
     
-    console.log('[SHOPS] Auth state check:', {
-      isAnyAuthLoading,
-      userId,
-      authUserId: authUser?.id,
-      shopeeUserId: user?.id,
-      hasLoaded: hasLoadedRef.current,
-    });
-    
     // Chờ auth loading xong mới query
     if (!isAnyAuthLoading && userId) {
       // Only load if not already loaded (unless refresh param was set)
       if (!hasLoadedRef.current) {
-        console.log('[SHOPS] Starting load for user:', userId);
         hasLoadedRef.current = true;
         loadShops(userId);
       }
     } else if (!isAnyAuthLoading && !userId) {
       // Auth xong nhưng không có user -> không loading nữa
-      console.log('[SHOPS] No user found after auth completed, stopping loading');
       setLoading(false);
     }
   }, [user?.id, authUser?.id, isAnyAuthLoading, loadShops]);
@@ -252,7 +233,6 @@ export function ShopManagementPanel({ readOnly = false }: ShopManagementPanelPro
     
     const timeout = setTimeout(() => {
       if (loading && shops.length === 0) {
-        console.warn('[SHOPS] Loading timeout - forcing stop');
         setLoading(false);
       }
     }, 5000);
@@ -263,59 +243,131 @@ export function ShopManagementPanel({ readOnly = false }: ShopManagementPanelPro
   // Note: Removed visibilitychange listener as it was causing unnecessary reloads
   // OAuth callback now uses ?refresh param to trigger reload when needed
 
-  // Tự động fetch expire_time cho các shop chưa có giá trị này
-  // expire_time được trả về từ Shopee API get_shop_info, không phải từ token API
-  const fetchedExpireTimeRef = useRef<Set<number>>(new Set());
+  // Tự động fetch thông tin shop cho các shop thiếu dữ liệu (shop_name hoặc expire_time)
+  // Dữ liệu này được lấy từ Shopee API get_shop_info, không phải từ token API
+  const fetchedShopInfoRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
-    const fetchMissingExpireTime = async () => {
-      // Tìm các shop chưa có expire_time VÀ chưa được fetch
-      const shopsNeedingExpireTime = shops.filter(
-        shop => !shop.expire_time && !fetchedExpireTimeRef.current.has(shop.shop_id)
+    const fetchMissingShopInfo = async () => {
+      // Tìm các shop thiếu shop_name HOẶC expire_time VÀ chưa được fetch
+      const shopsNeedingInfo = shops.filter(
+        shop => (!shop.shop_name || !shop.expire_time) && !fetchedShopInfoRef.current.has(shop.shop_id)
       );
 
-      if (shopsNeedingExpireTime.length === 0) return;
-
-      console.log('[SHOPS] Fetching expire_time for', shopsNeedingExpireTime.length, 'shops');
+      if (shopsNeedingInfo.length === 0) return;
 
       // Gọi API song song cho tất cả shops cần fetch (không chờ tuần tự)
-      const fetchPromises = shopsNeedingExpireTime.map(async (shop) => {
+      const fetchPromises = shopsNeedingInfo.map(async (shop) => {
         // Mark as fetched to prevent duplicate calls
-        fetchedExpireTimeRef.current.add(shop.shop_id);
+        fetchedShopInfoRef.current.add(shop.shop_id);
 
         try {
-          // Dùng cache trước, chỉ force_refresh khi cần
+          // Force refresh để lấy dữ liệu mới nhất từ Shopee API
+          // vì shop mới tạo có thể chưa có cache
           const { data, error } = await supabase.functions.invoke('shopee-shop', {
-            body: { action: 'get-full-info', shop_id: shop.shop_id, force_refresh: false },
+            body: { action: 'get-full-info', shop_id: shop.shop_id, force_refresh: true },
           });
 
           if (error) {
-            console.error('[SHOPS] Error fetching info for shop', shop.shop_id, error);
             return null;
           }
 
-          return { shop_id: shop.shop_id, expire_time: data?.info?.expire_time };
+          // Kiểm tra API error từ Shopee
+          if (data?.debug?.hasInfoError) {
+            return null;
+          }
+
+          // Lấy data từ response
+          const shopNameFromApi = data?.info?.shop_name;
+          const shopLogoFromApi = data?.profile?.response?.shop_logo;
+          const expireTimeFromApi = data?.info?.expire_time;
+          const authTimeFromApi = data?.info?.auth_time;
+
+          // Fetch lại từ DB để kiểm tra xem edge function đã lưu chưa
+          const { data: shopData, error: shopError } = await supabase
+            .from('apishopee_shops')
+            .select('shop_name, shop_logo, expire_time')
+            .eq('shop_id', shop.shop_id)
+            .single();
+
+          if (shopError) {
+            console.error('[SHOPS] ❌ Error fetching shop from DB:', shopError);
+          }
+
+          console.log('[SHOPS] DB data for shop', shop.shop_id, ':', shopData);
+
+          // Kiểm tra nếu DB vẫn chưa có data -> edge function không lưu được
+          // Frontend sẽ tự lưu trực tiếp
+          const dbNeedsUpdate = !shopData?.shop_name && shopNameFromApi;
+          
+          if (dbNeedsUpdate) {
+            console.log('[SHOPS] ⚠️ Edge function did not save data, saving from frontend...');
+            
+            const updateData: Record<string, unknown> = {
+              updated_at: new Date().toISOString(),
+            };
+            
+            if (shopNameFromApi) updateData.shop_name = shopNameFromApi;
+            if (shopLogoFromApi) updateData.shop_logo = shopLogoFromApi;
+            if (expireTimeFromApi) updateData.expire_time = expireTimeFromApi;
+            if (authTimeFromApi) updateData.auth_time = authTimeFromApi;
+            
+            // Region từ response
+            if (data?.info?.region) updateData.region = data.info.region;
+            
+            const { error: updateError } = await supabase
+              .from('apishopee_shops')
+              .update(updateData)
+              .eq('shop_id', shop.shop_id);
+
+            if (updateError) {
+              console.error('[SHOPS] ❌ Frontend save failed:', updateError);
+            } else {
+              console.log('[SHOPS] ✅ Frontend saved shop info to DB successfully');
+            }
+          }
+
+          // Ưu tiên dữ liệu từ DB (đã được edge function lưu), fallback về response trực tiếp
+          const shopName = shopData?.shop_name || shopNameFromApi;
+          const shopLogo = shopData?.shop_logo || shopLogoFromApi;
+          const expireTime = shopData?.expire_time || expireTimeFromApi;
+
+          console.log('[SHOPS] ✅ Final info for shop', shop.shop_id, ':', { shopName, expireTime });
+
+          return { 
+            shop_id: shop.shop_id, 
+            shop_name: shopName,
+            shop_logo: shopLogo,
+            expire_time: expireTime,
+          };
         } catch (err) {
-          console.error('[SHOPS] Error fetching info for shop', shop.shop_id, err);
+          console.error('[SHOPS] ❌ Error fetching info for shop', shop.shop_id, err);
           return null;
         }
       });
 
       const results = await Promise.all(fetchPromises);
       
-      // Batch update state một lần
-      const updates = results.filter(r => r?.expire_time);
+      // Batch update state một lần với tất cả thông tin đã fetch được
+      const updates = results.filter(r => r && (r.shop_name || r.expire_time));
       if (updates.length > 0) {
+        console.log('[SHOPS] Updating', updates.length, 'shops with new info');
         setShops(prev => prev.map(s => {
           const update = updates.find(u => u?.shop_id === s.shop_id);
-          return update ? { ...s, expire_time: update.expire_time } : s;
+          if (!update) return s;
+          return { 
+            ...s, 
+            shop_name: update.shop_name || s.shop_name,
+            shop_logo: update.shop_logo || s.shop_logo,
+            expire_time: update.expire_time || s.expire_time,
+          };
         }));
       }
     };
 
     // Chỉ chạy khi đã có shops và không đang loading
     if (shops.length > 0 && !loading) {
-      fetchMissingExpireTime();
+      fetchMissingShopInfo();
     }
   }, [shops, loading]); // Chạy khi shops thay đổi hoặc loading xong
 
@@ -328,10 +380,38 @@ export function ShopManagementPanel({ readOnly = false }: ShopManagementPanelPro
 
       if (error) throw error;
 
-      // Response structure: { info: {...}, profile: { response: {...} }, cached }
+      // Response structure: { info: {...}, profile: { response: {...} }, cached, debug: {...} }
+      console.log('[REFRESH] Raw response:', JSON.stringify(data, null, 2));
+      console.log('[REFRESH] Debug info:', data?.debug);
+      
       const shopName = data?.info?.shop_name;
       const shopLogo = data?.profile?.response?.shop_logo;
       const expireTime = data?.info?.expire_time; // Timestamp (seconds) khi authorization hết hạn
+      
+      // Check for API error in response
+      const apiError = data?.info?.error || data?.info?.message;
+      if (apiError && apiError !== '') {
+        console.error('[REFRESH] API error:', apiError, data?.info?.message);
+        toast({ 
+          title: 'Shopee API Error', 
+          description: `${apiError}: ${data?.info?.message || 'No details'}`, 
+          variant: 'destructive' 
+        });
+      }
+
+      // Reload shop data from database to get the persisted expire_time
+      // Edge function saves expire_time to DB, so we need to fetch it
+      const { data: shopData, error: shopError } = await supabase
+        .from('apishopee_shops')
+        .select('expire_time')
+        .eq('shop_id', shopId)
+        .single();
+
+      if (shopError) {
+        console.error('[REFRESH] Error fetching shop from DB:', shopError);
+      }
+
+      const persistedExpireTime = shopData?.expire_time || expireTime;
 
       if (shopName) {
         setShops(prev => prev.map(s =>
@@ -339,15 +419,15 @@ export function ShopManagementPanel({ readOnly = false }: ShopManagementPanelPro
             ...s,
             shop_name: shopName,
             shop_logo: shopLogo || s.shop_logo,
-            expire_time: expireTime || s.expire_time,
+            expire_time: persistedExpireTime || s.expire_time,
           } : s
         ));
         toast({ title: 'Thành công', description: `Đã cập nhật: ${shopName}` });
       } else {
         // Nếu không có shop_name, vẫn cập nhật expire_time nếu có
-        if (expireTime) {
+        if (persistedExpireTime) {
           setShops(prev => prev.map(s =>
-            s.shop_id === shopId ? { ...s, expire_time: expireTime } : s
+            s.shop_id === shopId ? { ...s, expire_time: persistedExpireTime } : s
           ));
         }
         toast({ title: 'Cảnh báo', description: 'Không lấy được tên shop từ Shopee', variant: 'destructive' });
