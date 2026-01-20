@@ -761,6 +761,49 @@ export function useAdsData(
           queryClient.invalidateQueries({ queryKey: performanceQueryKey });
         }
       )
+      // Subscribe to hourly performance changes
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'apishopee_ads_performance_hourly',
+          filter: `shop_id=eq.${shopId}`,
+        },
+        (payload) => {
+          console.log('[useAdsData] Hourly performance changed:', payload.eventType);
+          // Invalidate hourly data để refetch khi có thay đổi
+          setHourlyData({});
+        }
+      )
+      // Subscribe to shop-level daily performance changes (QUAN TRỌNG cho Overview)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'apishopee_ads_shop_performance_daily',
+          filter: `shop_id=eq.${shopId}`,
+        },
+        (payload) => {
+          console.log('[useAdsData] Shop-level daily performance changed:', payload.eventType);
+          queryClient.invalidateQueries({ queryKey: shopLevelQueryKey });
+        }
+      )
+      // Subscribe to shop-level hourly performance changes
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'apishopee_ads_shop_performance_hourly',
+          filter: `shop_id=eq.${shopId}`,
+        },
+        (payload) => {
+          console.log('[useAdsData] Shop-level hourly performance changed:', payload.eventType);
+          queryClient.invalidateQueries({ queryKey: shopLevelQueryKey });
+        }
+      )
       // Subscribe to sync status changes
       .on(
         'postgres_changes',
@@ -789,7 +832,7 @@ export function useAdsData(
       console.log('[useAdsData] Unsubscribing from realtime');
       supabase.removeChannel(channel);
     };
-  }, [shopId, userId, queryClient, campaignsQueryKey, performanceQueryKey]);
+  }, [shopId, userId, queryClient, campaignsQueryKey, performanceQueryKey, shopLevelQueryKey]);
 
   // ==================== RETURN ====================
 
