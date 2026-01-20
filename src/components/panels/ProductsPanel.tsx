@@ -6,10 +6,17 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw, Search, Package, ChevronDown, ChevronUp, Link2, Clock, Database } from 'lucide-react';
+import { RefreshCw, Search, Package, ChevronDown, ChevronUp, Link2, Clock, Database, FileJson } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
@@ -97,6 +104,11 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
   const [syncing, setSyncing] = useState(false);
+
+  // API Response state
+  const [showApiResponse, setShowApiResponse] = useState(false);
+  const [apiResponses, setApiResponses] = useState<Record<string, any>>({});
+  const [loadingApiResponse, setLoadingApiResponse] = useState(false);
 
   // Query keys
   const productsQueryKey = ['products', shopId];
@@ -263,6 +275,64 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
     setExpandedItems(new Set());
   }, [shopId]);
 
+  // Fetch API responses để xem raw data từ Shopee
+  const fetchAllApiResponses = async () => {
+    setLoadingApiResponse(true);
+    const responses: Record<string, any> = {};
+
+    try {
+      // 1. Get Item List - lấy danh sách item IDs (chỉ lấy trang đầu để demo)
+      const { data: itemListRes, error: itemListErr } = await supabase.functions.invoke('apishopee-product', {
+        body: {
+          action: 'get-item-list',
+          shop_id: shopId,
+          offset: 0,
+          page_size: 20,
+          item_status: ['NORMAL'],
+        },
+      });
+      responses['get-item-list'] = itemListErr ? { error: itemListErr.message } : itemListRes;
+
+      // 2. Get Item Base Info - lấy chi tiết sản phẩm (nếu có item list)
+      const itemIds = itemListRes?.response?.item?.map((i: any) => i.item_id)?.slice(0, 5) || [];
+      if (itemIds.length > 0) {
+        const { data: itemBaseInfoRes, error: itemBaseInfoErr } = await supabase.functions.invoke('apishopee-product', {
+          body: {
+            action: 'get-item-base-info',
+            shop_id: shopId,
+            item_id_list: itemIds,
+          },
+        });
+        responses['get-item-base-info'] = itemBaseInfoErr ? { error: itemBaseInfoErr.message } : itemBaseInfoRes;
+
+        // 3. Get Model List - lấy models/variants cho sản phẩm đầu tiên có has_model = true
+        const itemWithModel = itemBaseInfoRes?.response?.item_list?.find((i: any) => i.has_model);
+        if (itemWithModel) {
+          const { data: modelListRes, error: modelListErr } = await supabase.functions.invoke('apishopee-product', {
+            body: {
+              action: 'get-model-list',
+              shop_id: shopId,
+              item_id: itemWithModel.item_id,
+            },
+          });
+          responses['get-model-list'] = modelListErr ? { error: modelListErr.message } : {
+            item_id: itemWithModel.item_id,
+            item_name: itemWithModel.item_name,
+            ...modelListRes,
+          };
+        }
+      }
+
+      setApiResponses(responses);
+      setShowApiResponse(true);
+      toast({ title: 'Đã tải API responses', description: `${Object.keys(responses).length} API calls` });
+    } catch (e) {
+      toast({ title: 'Lỗi', description: (e as Error).message, variant: 'destructive' });
+    } finally {
+      setLoadingApiResponse(false);
+    }
+  };
+
   // Filter products theo search term
   const filteredProducts = useMemo(() => {
     if (!searchTerm) return products;
@@ -321,6 +391,16 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
               <Clock className="h-3.5 w-3.5" />
               <span>Tự động mỗi 1h</span>
             </div>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchAllApiResponses}
+              disabled={loading || syncing || loadingApiResponse}
+            >
+              <FileJson className={cn("h-4 w-4 mr-2", loadingApiResponse && "animate-spin")} />
+              Response
+            </Button>
             
             <Button
               variant="outline"
@@ -541,6 +621,61 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
               )}
             </div>
           </div>
+        )}
+
+        {/* API Response Dialog */}
+        {showApiResponse && (
+          <Dialog open={showApiResponse} onOpenChange={setShowApiResponse}>
+            <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+              <DialogHeader>
+                <DialogTitle>API Responses - Products</DialogTitle>
+              </DialogHeader>
+              <div className="flex-1 overflow-auto space-y-4 py-4">
+                {Object.entries(apiResponses).map(([apiName, response]) => (
+                  <div key={apiName} className="border rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-semibold text-sm">
+                        {apiName}
+                        {apiName === 'get-item-list' && (
+                          <span className="ml-2 text-xs font-normal text-slate-500">
+                            (Lấy danh sách item IDs)
+                          </span>
+                        )}
+                        {apiName === 'get-item-base-info' && (
+                          <span className="ml-2 text-xs font-normal text-slate-500">
+                            (Lấy chi tiết sản phẩm)
+                          </span>
+                        )}
+                        {apiName === 'get-model-list' && (
+                          <span className="ml-2 text-xs font-normal text-slate-500">
+                            (Lấy models/variants)
+                          </span>
+                        )}
+                      </h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(JSON.stringify(response, null, 2));
+                          toast({ title: 'Đã copy', description: `Response của ${apiName}` });
+                        }}
+                      >
+                        Copy
+                      </Button>
+                    </div>
+                    <pre className="bg-slate-50 p-3 rounded text-xs overflow-auto max-h-96">
+                      {JSON.stringify(response, null, 2)}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowApiResponse(false)}>
+                  Đóng
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         )}
       </CardContent>
     </Card>
