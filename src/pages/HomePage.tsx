@@ -71,12 +71,13 @@ export default function HomePage() {
 
     setIsLoading(true);
     try {
+      if (signal?.aborted) return;
+
       const { data, error } = await supabase
         .from('apishopee_shops')
         .select('id, shop_id, shop_name, shop_logo, region, expired_at, access_token_expired_at')
         .eq('shop_id', selectedShopId)
-        .single()
-        .abortSignal(signal!);
+        .single();
 
       if (signal?.aborted) return;
 
