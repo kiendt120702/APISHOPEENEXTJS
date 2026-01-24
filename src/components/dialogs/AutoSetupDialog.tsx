@@ -551,34 +551,9 @@ export function AutoSetupDialog({
               <SelectContent>
                 <SelectItem value="0">Tạo ngay lập tức</SelectItem>
                 <SelectItem value="10">10 phút trước khung giờ</SelectItem>
-                <SelectItem value="15">15 phút trước khung giờ</SelectItem>
                 <SelectItem value="30">30 phút trước khung giờ</SelectItem>
-                <SelectItem value="60">1 giờ trước khung giờ</SelectItem>
-                <SelectItem value="120">2 giờ trước khung giờ</SelectItem>
-                <SelectItem value="custom">Tùy chỉnh...</SelectItem>
               </SelectContent>
             </Select>
-
-            {isCustomLeadTime && (
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={10}
-                  max={1440}
-                  placeholder="Tối thiểu 10"
-                  value={customLeadTimeInput}
-                  onChange={(e) => {
-                    setCustomLeadTimeInput(e.target.value);
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val) && val >= 10) {
-                      setLeadTimeMinutes(val);
-                    }
-                  }}
-                  className="w-24 h-8"
-                />
-                <span className="text-sm text-slate-500">phút trước khung giờ</span>
-              </div>
-            )}
             <p className="text-xs text-slate-500">
               {leadTimeMinutes === 0
                 ? 'Tất cả Flash Sale sẽ được tạo ngay lập tức'
