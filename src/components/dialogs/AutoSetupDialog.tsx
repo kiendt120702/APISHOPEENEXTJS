@@ -550,7 +550,6 @@ export function AutoSetupDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="0">Tạo ngay lập tức</SelectItem>
-                <SelectItem value="5">5 phút trước khung giờ</SelectItem>
                 <SelectItem value="10">10 phút trước khung giờ</SelectItem>
                 <SelectItem value="15">15 phút trước khung giờ</SelectItem>
                 <SelectItem value="30">30 phút trước khung giờ</SelectItem>
@@ -564,14 +563,14 @@ export function AutoSetupDialog({
               <div className="flex items-center gap-2">
                 <Input
                   type="number"
-                  min={1}
+                  min={10}
                   max={1440}
-                  placeholder="Nhập số phút"
+                  placeholder="Tối thiểu 10"
                   value={customLeadTimeInput}
                   onChange={(e) => {
                     setCustomLeadTimeInput(e.target.value);
                     const val = parseInt(e.target.value);
-                    if (!isNaN(val) && val > 0) {
+                    if (!isNaN(val) && val >= 10) {
                       setLeadTimeMinutes(val);
                     }
                   }}
