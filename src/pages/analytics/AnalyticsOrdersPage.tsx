@@ -16,8 +16,8 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
-  TooltipProps,
 } from 'recharts';
+import type { Payload } from 'recharts/types/component/DefaultTooltipContent';
 import {
   ShoppingCart,
   CheckCircle,
@@ -178,7 +178,7 @@ interface ChartDataPayload {
   orders: number;
 }
 
-function CustomTooltip({ active, payload }: TooltipProps<number, string>) {
+function CustomTooltip({ active, payload }: { active?: boolean; payload?: Payload<number, string>[] }) {
   if (!active || !payload || !payload.length) return null;
 
   const dataPayload = payload[0]?.payload as ChartDataPayload | undefined;
@@ -199,7 +199,7 @@ function CustomTooltip({ active, payload }: TooltipProps<number, string>) {
     <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-3 min-w-[200px]">
       <p className="text-sm font-medium text-slate-700 mb-2">{formattedDate}</p>
       <div className="space-y-1.5">
-        {payload.map((entry, index) => (
+        {payload.map((entry: Payload<number, string>, index: number) => (
           <div key={index} className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <div
@@ -760,7 +760,7 @@ export default function AnalyticsOrdersPage() {
                   <ResponsiveContainer width="100%" height={180}>
                     <PieChart>
                       <Pie
-                        data={data.valueRanges.filter((r) => r.count > 0)}
+                        data={data.valueRanges.filter((r) => r.count > 0) as unknown as Record<string, unknown>[]}
                         cx="50%"
                         cy="50%"
                         outerRadius={70}
@@ -772,10 +772,13 @@ export default function AnalyticsOrdersPage() {
                         ))}
                       </Pie>
                       <Tooltip
-                        formatter={(value: number, _name: string, props: { payload?: { range?: string; percent?: number } }) => [
-                          `${formatNumber(value)} đơn (${props.payload?.percent?.toFixed(2) || 0}%)`,
-                          props.payload?.range || ''
-                        ]}
+                        formatter={(value, _name, props) => {
+                          const payload = props.payload as { range?: string; percent?: number } | undefined;
+                          return [
+                            `${formatNumber(Number(value))} đơn (${payload?.percent?.toFixed(2) || 0}%)`,
+                            payload?.range || ''
+                          ];
+                        }}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -862,7 +865,7 @@ export default function AnalyticsOrdersPage() {
                   <ResponsiveContainer width="100%" height={180}>
                     <PieChart>
                       <Pie
-                        data={data.quantityRanges.filter((r) => r.count > 0)}
+                        data={data.quantityRanges.filter((r) => r.count > 0) as unknown as Record<string, unknown>[]}
                         cx="50%"
                         cy="50%"
                         outerRadius={70}
@@ -874,10 +877,13 @@ export default function AnalyticsOrdersPage() {
                         ))}
                       </Pie>
                       <Tooltip
-                        formatter={(value: number, _name: string, props: { payload?: { range?: string; percent?: number } }) => [
-                          `${formatNumber(value)} đơn (${props.payload?.percent?.toFixed(2) || 0}%)`,
-                          props.payload?.range || ''
-                        ]}
+                        formatter={(value, _name, props) => {
+                          const payload = props.payload as { range?: string; percent?: number } | undefined;
+                          return [
+                            `${formatNumber(Number(value))} đơn (${payload?.percent?.toFixed(2) || 0}%)`,
+                            payload?.range || ''
+                          ];
+                        }}
                       />
                     </PieChart>
                   </ResponsiveContainer>

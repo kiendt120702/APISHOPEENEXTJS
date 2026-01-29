@@ -13,8 +13,8 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
-  TooltipProps,
 } from 'recharts';
+import type { Payload } from 'recharts/types/component/DefaultTooltipContent';
 import { ChevronDown, TrendingUp, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -75,7 +75,7 @@ interface ChartDataPayload extends DailyActivityStats {
   displayDate: string;
 }
 
-function CustomTooltip({ active, payload }: TooltipProps<number, string>) {
+function CustomTooltip({ active, payload }: { active?: boolean; payload?: Payload<number, string>[] }) {
   if (!active || !payload || !payload.length) return null;
 
   const dataPayload = payload[0]?.payload as ChartDataPayload | undefined;
@@ -99,7 +99,7 @@ function CustomTooltip({ active, payload }: TooltipProps<number, string>) {
     <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-3 min-w-[200px]">
       <p className="text-sm font-medium text-slate-700 mb-2 border-b pb-2">{formattedDate}</p>
       <div className="space-y-1.5">
-        {sortedPayload.map((entry, index) => (
+        {sortedPayload.map((entry: Payload<number, string>, index: number) => (
           <div key={index} className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <div
