@@ -738,8 +738,98 @@ async function updateSyncStatus(
 }
 
 /**
+ * Gọi Edge Function để tạo history logs
+ */
+async function createHistoryLogs(
+  supabase: ReturnType<typeof createClient>,
+  diffs: Array<{
+    shop_id: number;
+    user_id: string;
+    item_id: number;
+    item_name: string;
+    old_data: Record<string, unknown>;
+    new_data: Record<string, unknown>;
+    shopee_timestamp?: number;
+    raw_response?: unknown;
+  }>
+): Promise<{ logs_created: number; errors: string[] }> {
+  if (diffs.length === 0) return { logs_created: 0, errors: [] };
+
+  try {
+    const { data, error } = await supabase.functions.invoke('apishopee-product-webhook', {
+      body: { action: 'process-diff', diffs },
+    });
+
+    if (error) {
+      console.error('[HISTORY] Error calling webhook function:', error);
+      return { logs_created: 0, errors: [error.message] };
+    }
+
+    return { logs_created: data?.logs_created || 0, errors: data?.errors || [] };
+  } catch (err) {
+    console.error('[HISTORY] Exception:', err);
+    return { logs_created: 0, errors: [(err as Error).message] };
+  }
+}
+
+/**
+ * Log sản phẩm mới được tạo
+ */
+async function logProductCreated(
+  supabase: ReturnType<typeof createClient>,
+  shopId: number,
+  userId: string,
+  product: { item_id: number; item_name: string; current_price: number; total_available_stock: number; update_time?: number },
+  rawResponse?: unknown
+): Promise<void> {
+  try {
+    await supabase.functions.invoke('apishopee-product-webhook', {
+      body: {
+        action: 'log-product-created',
+        shop_id: shopId,
+        user_id: userId,
+        item_id: product.item_id,
+        item_name: product.item_name,
+        current_price: product.current_price,
+        total_stock: product.total_available_stock,
+        shopee_timestamp: product.update_time,
+        raw_response: rawResponse,
+      },
+    });
+  } catch (err) {
+    console.error('[HISTORY] Error logging product created:', err);
+  }
+}
+
+/**
+ * Log sản phẩm bị xóa
+ */
+async function logProductDeleted(
+  supabase: ReturnType<typeof createClient>,
+  shopId: number,
+  userId: string,
+  itemId: number,
+  itemName?: string
+): Promise<void> {
+  try {
+    await supabase.functions.invoke('apishopee-product-webhook', {
+      body: {
+        action: 'log-product-deleted',
+        shop_id: shopId,
+        user_id: userId,
+        item_id: itemId,
+        item_name: itemName,
+      },
+    });
+  } catch (err) {
+    console.error('[HISTORY] Error logging product deleted:', err);
+  }
+}
+
+/**
  * Incremental sync - chỉ update những products thay đổi
  * Không xóa toàn bộ, chỉ UPDATE/INSERT/DELETE theo item_id
+ * Tích hợp History Logging để theo dõi thay đổi
  */
 async function incrementalSyncProducts(
   supabase: ReturnType<typeof createClient>,
@@ -748,9 +838,12 @@ async function incrementalSyncProducts(
   userId: string,
   token: { access_token: string; refresh_token: string },
   changedItemIds: number[]
-): Promise<{ success: boolean; updated_count: number; inserted_count: number; deleted_count: number; error?: string }> {
+): Promise<{ success: boolean; updated_count: number; inserted_count: number; deleted_count: number; history_logs_created?: number; error?: string }> {
   try {
     console.log(`[INCREMENTAL] Starting incremental sync for ${changedItemIds.length} changed items`);
+
+    // Biến để track history logs
+    let historyLogsCreated = 0;
 
     // ========== STEP 1: Lấy tất cả item_ids hiện tại từ Shopee ==========
     const statuses = ['NORMAL', 'UNLIST', 'BANNED'];
@@ -786,13 +879,14 @@ async function incrementalSyncProducts(
       }
     }
 
-    // ========== STEP 2: Lấy item_ids hiện có trong DB ==========
+    // ========== STEP 2: Lấy item_ids hiện có trong DB (với thông tin để so sánh và log) ==========
     const { data: dbProducts } = await supabase
       .from('apishopee_products')
-      .select('item_id')
+      .select('item_id, item_name, current_price, original_price, total_available_stock, item_status')
       .eq('shop_id', shopId)
       .eq('user_id', userId);
 
+    const dbProductsMap = new Map((dbProducts || []).map(p => [p.item_id, p]));
     const dbItemIds = new Set((dbProducts || []).map(p => p.item_id));
     const shopeeItemIds = new Set(allShopeeItemIds);
 
@@ -802,6 +896,13 @@ async function incrementalSyncProducts(
 
     if (itemsToDelete.length > 0) {
       console.log(`[INCREMENTAL] Deleting ${itemsToDelete.length} removed items`);
+
+      // Log sản phẩm bị xóa vào history
+      for (const itemId of itemsToDelete) {
+        const oldProduct = dbProductsMap.get(itemId);
+        await logProductDeleted(supabase, shopId, userId, itemId, oldProduct?.item_name);
+        historyLogsCreated++;
+      }
 
       // Xóa models và tier variations trước
       await supabase.from('apishopee_product_models')
@@ -921,9 +1022,19 @@ async function incrementalSyncProducts(
       }
     }
 
-    // ========== STEP 8: UPSERT products (insert or update) ==========
+    // ========== STEP 8: UPSERT products (insert or update) + HISTORY LOGGING ==========
     let insertedCount = 0;
     let updatedCount = 0;
+    const diffsToLog: Array<{
+      shop_id: number;
+      user_id: string;
+      item_id: number;
+      item_name: string;
+      old_data: Record<string, unknown>;
+      new_data: Record<string, unknown>;
+      shopee_timestamp?: number;
+      raw_response?: unknown;
+    }> = [];
 
     for (const p of allProducts) {
       const modelInfo = productModelsMap.get(p.item_id);
@@ -964,6 +1075,41 @@ async function incrementalSyncProducts(
       };
 
       const isNew = itemsToInsert.includes(p.item_id);
+      const oldProduct = dbProductsMap.get(p.item_id);
+
+      // So sánh và tạo diff cho history logging (chỉ cho sản phẩm cập nhật)
+      if (!isNew && oldProduct) {
+        const hasChanges =
+          oldProduct.current_price !== currentPrice ||
+          oldProduct.total_available_stock !== totalAvailableStock ||
+          oldProduct.item_status !== p.item_status ||
+          oldProduct.item_name !== p.item_name;
+
+        if (hasChanges) {
+          diffsToLog.push({
+            shop_id: shopId,
+            user_id: userId,
+            item_id: p.item_id,
+            item_name: p.item_name,
+            old_data: {
+              current_price: oldProduct.current_price,
+              original_price: oldProduct.original_price,
+              total_available_stock: oldProduct.total_available_stock,
+              item_status: oldProduct.item_status,
+              item_name: oldProduct.item_name,
+            },
+            new_data: {
+              current_price: currentPrice,
+              original_price: originalPrice,
+              total_available_stock: totalAvailableStock,
+              item_status: p.item_status,
+              item_name: p.item_name,
+            },
+            shopee_timestamp: p.update_time,
+            raw_response: p,
+          });
+        }
+      }
 
       // Upsert product
       await supabase.from('apishopee_products').upsert(productData, {
@@ -972,6 +1118,15 @@ async function incrementalSyncProducts(
 
       if (isNew) {
         insertedCount++;
+        // Log sản phẩm mới
+        await logProductCreated(supabase, shopId, userId, {
+          item_id: p.item_id,
+          item_name: p.item_name,
+          current_price: currentPrice,
+          total_available_stock: totalAvailableStock,
+          update_time: p.update_time,
+        }, p);
+        historyLogsCreated++;
       } else {
         updatedCount++;
       }
@@ -1047,16 +1202,26 @@ async function incrementalSyncProducts(
       }
     }
 
-    // ========== STEP 9: Update sync status ==========
+    // ========== STEP 9: Tạo history logs cho các thay đổi đã phát hiện ==========
+    if (diffsToLog.length > 0) {
+      console.log(`[INCREMENTAL] Creating history logs for ${diffsToLog.length} changed products`);
+      const historyResult = await createHistoryLogs(supabase, diffsToLog);
+      historyLogsCreated += historyResult.logs_created;
+      if (historyResult.errors.length > 0) {
+        console.warn('[INCREMENTAL] History logging errors:', historyResult.errors);
+      }
+    }
+
+    // ========== STEP 10: Update sync status ==========
     await updateSyncStatus(supabase, shopId, userId);
 
-    console.log(`[INCREMENTAL] Completed: ${insertedCount} inserted, ${updatedCount} updated, ${deletedCount} deleted`);
-    return { success: true, updated_count: updatedCount, inserted_count: insertedCount, deleted_count: deletedCount };
+    console.log(`[INCREMENTAL] Completed: ${insertedCount} inserted, ${updatedCount} updated, ${deletedCount} deleted, ${historyLogsCreated} history logs`);
+    return { success: true, updated_count: updatedCount, inserted_count: insertedCount, deleted_count: deletedCount, history_logs_created: historyLogsCreated };
 
   } catch (error) {
     const errorMessage = (error as Error).message;
     console.error('[INCREMENTAL] Error:', errorMessage);
-    return { success: false, updated_count: 0, inserted_count: 0, deleted_count: 0, error: errorMessage };
+    return { success: false, updated_count: 0, inserted_count: 0, deleted_count: 0, history_logs_created: 0, error: errorMessage };
   }
 }
 

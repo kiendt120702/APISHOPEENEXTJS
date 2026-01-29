@@ -46,6 +46,8 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
+import { ActivityTrendChart } from '@/components/settings/ActivityTrendChart';
+import { useActivityTrends } from '@/hooks/useActivityTrends';
 
 // Types
 interface ActivityLog {
@@ -133,6 +135,18 @@ export default function AdvancedSettingsPage() {
   // Detail dialog
   const [selectedLog, setSelectedLog] = useState<ActivityLog | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+
+  // Activity Trend Chart
+  const [chartDateRange, setChartDateRange] = useState('7');
+  const {
+    data: trendData,
+    loading: trendLoading,
+    refetch: refetchTrends,
+  } = useActivityTrends({
+    days: parseInt(chartDateRange),
+    shopId: shopFilter !== 'all' ? parseInt(shopFilter) : null,
+    userId: userFilter !== 'all' ? userFilter : null,
+  });
 
   // Fetch reference data
   useEffect(() => {
@@ -371,10 +385,13 @@ export default function AdvancedSettingsPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={fetchLogs}
-          disabled={loading}
+          onClick={() => {
+            fetchLogs();
+            refetchTrends();
+          }}
+          disabled={loading || trendLoading}
         >
-          <RefreshCw className={`w-4 h-4 sm:mr-2 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 sm:mr-2 ${loading || trendLoading ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">Làm mới</span>
         </Button>
       </div>
@@ -415,6 +432,16 @@ export default function AdvancedSettingsPage() {
           </div>
           <p className="text-lg font-bold text-slate-700 mt-1">{totalCount}</p>
         </div>
+      </div>
+
+      {/* Activity Trend Chart */}
+      <div className="px-4 sm:px-6">
+        <ActivityTrendChart
+          data={trendData}
+          loading={trendLoading}
+          dateRange={chartDateRange}
+          onDateRangeChange={setChartDateRange}
+        />
       </div>
 
       {/* Filters */}

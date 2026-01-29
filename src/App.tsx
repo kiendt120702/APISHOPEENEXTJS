@@ -39,7 +39,7 @@ import AdsSchedulesPage from '@/pages/AdsSchedulesPage';
 import AdsHistoryPage from '@/pages/AdsHistoryPage';
 
 // Analytics Pages
-import AnalyticsOrdersPage from '@/pages/analytics/AnalyticsOrdersPage';
+import AnalyticsOrdersPage from '@/pages/analytics/AnalyticsOrdersPageOptimized';
 import AnalyticsReviewsPage from '@/pages/analytics/AnalyticsReviewsPage';
 import AnalyticsCampaignsPage from '@/pages/analytics/AnalyticsCampaignsPage';
 

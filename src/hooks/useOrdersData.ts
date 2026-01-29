@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import { logCompletedActivity } from '@/lib/activity-logger';
 
 // ==================== INTERFACES ====================
 
@@ -398,6 +399,7 @@ export function useOrdersData(
     if (syncing) return { success: false, message: 'Đang đồng bộ...' };
 
     setSyncing(true);
+    const startTime = new Date();
     try {
       const res = await supabase.functions.invoke('apishopee-orders-sync', {
         body: {
@@ -418,22 +420,58 @@ export function useOrdersData(
         const message = result.mode === 'quick'
           ? `Đã tải ${result.synced_count} đơn hàng`
           : `Mới: ${result.new_orders}, Cập nhật: ${result.updated_orders}`;
+
+        // Log activity
+        await logCompletedActivity({
+          userId,
+          shopId,
+          actionType: 'orders_sync',
+          actionCategory: 'orders',
+          actionDescription: `Đồng bộ đơn hàng: ${message}`,
+          status: 'success',
+          source: 'manual',
+          startedAt: startTime,
+          completedAt: new Date(),
+          durationMs: Date.now() - startTime.getTime(),
+          responseData: {
+            mode: result.mode,
+            synced_count: result.synced_count,
+            new_orders: result.new_orders,
+            updated_orders: result.updated_orders,
+          },
+        });
+
         return { success: true, message };
       } else {
         throw new Error(result.error || 'Sync failed');
       }
     } catch (err) {
+      // Log failed activity
+      await logCompletedActivity({
+        userId,
+        shopId,
+        actionType: 'orders_sync',
+        actionCategory: 'orders',
+        actionDescription: `Đồng bộ đơn hàng thất bại`,
+        status: 'failed',
+        source: 'manual',
+        startedAt: startTime,
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime.getTime(),
+        errorMessage: (err as Error).message,
+      });
       return { success: false, message: (err as Error).message };
     } finally {
       setSyncing(false);
     }
-  }, [shopId, syncing, fetchSyncStatus, queryClient, queryKey]);
+  }, [shopId, userId, syncing, fetchSyncStatus, queryClient, queryKey]);
 
   // Sync orders for a specific month (chunked)
   const syncMonth = useCallback(async (month: string, chunkEnd?: number): Promise<MonthSyncResult> => {
     if (syncing) return { success: false, synced_count: 0, has_more: false, error: 'Đang đồng bộ...' };
 
     setSyncing(true);
+    const startTime = new Date();
     try {
       const res = await supabase.functions.invoke('apishopee-orders-sync', {
         body: {
@@ -450,14 +488,48 @@ export function useOrdersData(
       if (result.success) {
         await fetchSyncStatus();
         queryClient.invalidateQueries({ queryKey });
+
+        // Log activity
+        await logCompletedActivity({
+          userId,
+          shopId,
+          actionType: 'orders_sync_month',
+          actionCategory: 'orders',
+          actionDescription: `Đồng bộ đơn hàng tháng ${month}: ${result.synced_count} đơn`,
+          status: 'success',
+          source: 'manual',
+          startedAt: startTime,
+          completedAt: new Date(),
+          durationMs: Date.now() - startTime.getTime(),
+          responseData: {
+            month,
+            synced_count: result.synced_count,
+            has_more: result.has_more,
+            month_completed: result.month_completed,
+          },
+        });
       }
       return result;
     } catch (err) {
+      // Log failed activity
+      await logCompletedActivity({
+        userId,
+        shopId,
+        actionType: 'orders_sync_month',
+        actionCategory: 'orders',
+        actionDescription: `Đồng bộ đơn hàng tháng ${month} thất bại`,
+        status: 'failed',
+        source: 'manual',
+        startedAt: startTime,
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime.getTime(),
+        errorMessage: (err as Error).message,
+      });
       return { success: false, synced_count: 0, has_more: false, error: (err as Error).message };
     } finally {
       setSyncing(false);
     }
-  }, [shopId, syncing, fetchSyncStatus, queryClient, queryKey]);
+  }, [shopId, userId, syncing, fetchSyncStatus, queryClient, queryKey]);
 
   // Continue syncing current month
   const continueMonthSync = useCallback(async (): Promise<MonthSyncResult> => {

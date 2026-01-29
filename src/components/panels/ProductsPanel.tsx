@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
+import { logCompletedActivity } from '@/lib/activity-logger';
 
 import { ImageWithZoom } from '@/components/ui/image-with-zoom';
 
@@ -173,6 +174,7 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
   });
 
   // Fetch sync status (for cache invalidation and display last sync time)
+  // Query theo shop_id, lấy record có products_synced_at mới nhất (không phụ thuộc user_id)
   const { data: syncStatus } = useQuery({
     queryKey: syncStatusQueryKey,
     queryFn: async () => {
@@ -180,11 +182,13 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
         .from('apishopee_sync_status')
         .select('products_synced_at')
         .eq('shop_id', shopId)
-        .eq('user_id', userId)
+        .not('products_synced_at', 'is', null)
+        .order('products_synced_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
       return data;
     },
-    enabled: !!shopId && !!userId,
+    enabled: !!shopId,
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
     refetchOnMount: false,
@@ -247,6 +251,7 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
     if (syncing) return;
 
     setSyncing(true);
+    const startTime = new Date();
     try {
       const { data, error } = await supabase.functions.invoke('apishopee-product', {
         body: {
@@ -275,11 +280,46 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
           description: `Đã đồng bộ ${data?.synced_count || 0} sản phẩm`,
         });
       }
+
+      // Log activity
+      logCompletedActivity({
+        userId,
+        shopId,
+        actionType: 'products_sync',
+        actionCategory: 'products',
+        actionDescription: data?.has_changes === false
+          ? 'Kiểm tra sản phẩm: không có thay đổi'
+          : `Đồng bộ sản phẩm: ${data?.synced_count || 0} sản phẩm`,
+        status: 'success',
+        source: 'manual',
+        startedAt: startTime,
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime.getTime(),
+        responseData: {
+          has_changes: data?.has_changes,
+          synced_count: data?.synced_count,
+        },
+      });
     } catch (err) {
       toast({
         title: 'Lỗi đồng bộ',
         description: (err as Error).message,
         variant: 'destructive',
+      });
+
+      // Log failed activity
+      logCompletedActivity({
+        userId,
+        shopId,
+        actionType: 'products_sync',
+        actionCategory: 'products',
+        actionDescription: 'Đồng bộ sản phẩm thất bại',
+        status: 'failed',
+        source: 'manual',
+        startedAt: startTime,
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime.getTime(),
+        errorMessage: (err as Error).message,
       });
     } finally {
       setSyncing(false);
@@ -356,123 +396,128 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
 
 
   return (
-    <Card className="border-0 shadow-sm">
-      <CardContent className="p-0">
-        {/* Status Tabs + Search + Actions - All in one row */}
-        <div className="flex items-center justify-between border-b bg-white px-2 gap-2">
-          {/* Left: Status Tabs */}
-          <div className="flex items-center flex-shrink-0">
-            {STATUS_TABS.map(tab => (
-              <button
-                key={tab.key}
-                onClick={() => {
-                  setStatusFilter(tab.key);
-                  setCurrentPage(1);
-                }}
-                className={cn(
-                  'px-3 md:px-4 py-3 text-xs md:text-sm whitespace-nowrap border-b-2 -mb-px transition-colors cursor-pointer',
-                  statusFilter === tab.key
-                    ? 'border-orange-500 text-orange-600 font-medium'
-                    : 'border-transparent text-slate-600 hover:text-slate-800'
-                )}
+    <Card className="border-0 shadow-sm flex flex-col h-[calc(100vh-73px)]">
+      <CardContent className="p-0 flex flex-col h-full overflow-hidden">
+        {/* Sticky Header Section */}
+        <div className="flex-shrink-0">
+          {/* Status Tabs + Search + Actions - All in one row */}
+          <div className="flex items-center justify-between border-b bg-white px-2 gap-2">
+            {/* Left: Status Tabs */}
+            <div className="flex items-center flex-shrink-0">
+              {STATUS_TABS.map(tab => (
+                <button
+                  key={tab.key}
+                  onClick={() => {
+                    setStatusFilter(tab.key);
+                    setCurrentPage(1);
+                  }}
+                  className={cn(
+                    'px-3 md:px-4 py-3 text-xs md:text-sm whitespace-nowrap border-b-2 -mb-px transition-colors cursor-pointer',
+                    statusFilter === tab.key
+                      ? 'border-orange-500 text-orange-600 font-medium'
+                      : 'border-transparent text-slate-600 hover:text-slate-800'
+                  )}
+                >
+                  {tab.label}
+                  {(statusCounts[tab.key] || 0) > 0 && (
+                    <span className="text-slate-400 ml-1">({statusCounts[tab.key]})</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Right: Search + Auto-sync + Buttons */}
+            <div className="flex items-center gap-2 flex-shrink-0 py-2">
+              {/* Search bar - hidden on mobile */}
+              <div className="relative hidden md:block">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <Input
+                  placeholder="Tìm tên, SKU, ID..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8 h-8 text-xs w-40 lg:w-52"
+                />
+              </div>
+
+              {/* Last sync time indicator - hide on mobile */}
+              <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-400" title={syncStatus?.products_synced_at ? `Sync lúc: ${new Date(syncStatus.products_synced_at).toLocaleString('vi-VN')}` : 'Chưa đồng bộ'}>
+                <Database className="h-3.5 w-3.5" />
+                <span>Sync: {formatRelativeTime(syncStatus?.products_synced_at)}</span>
+              </div>
+
+              {/* Sync Button */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={syncProducts}
+                disabled={loading || syncing}
+                className="h-8 text-xs"
               >
-                {tab.label}
-                {(statusCounts[tab.key] || 0) > 0 && (
-                  <span className="text-slate-400 ml-1">({statusCounts[tab.key]})</span>
-                )}
-              </button>
-            ))}
+                <RefreshCw className={cn("h-4 w-4 mr-1 md:mr-1.5", (loading || syncing) && "animate-spin")} />
+                <span className="hidden md:inline">{syncing ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}</span>
+                <span className="md:hidden">Sync</span>
+              </Button>
+            </div>
           </div>
 
-          {/* Right: Search + Auto-sync + Buttons */}
-          <div className="flex items-center gap-2 flex-shrink-0 py-2">
-            {/* Search bar - hidden on mobile */}
-            <div className="relative hidden md:block">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+          {/* Mobile Search - Only visible on small screens */}
+          <div className="md:hidden p-2 border-b bg-slate-50">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <Input
-                placeholder="Tìm tên, SKU, ID..."
+                placeholder="Tìm theo tên, SKU hoặc ID..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 h-8 text-xs w-40 lg:w-52"
+                className="pl-9 text-sm h-9"
               />
             </div>
+          </div>
 
-            {/* Last sync time indicator - hide on mobile */}
-            <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-400" title={syncStatus?.products_synced_at ? `Sync lúc: ${new Date(syncStatus.products_synced_at).toLocaleString('vi-VN')}` : 'Chưa đồng bộ'}>
-              <Database className="h-3.5 w-3.5" />
-              <span>Sync: {formatRelativeTime(syncStatus?.products_synced_at)}</span>
+          {/* Table Header - Desktop only */}
+          <div className="hidden md:grid grid-cols-12 gap-4 px-4 py-3 bg-slate-50 border-b text-sm font-medium text-slate-600">
+            <div className="col-span-3">Sản phẩm</div>
+            <div className="col-span-7">
+              <div className="grid grid-cols-7 gap-2">
+                <div className="col-span-3">Hàng hóa</div>
+                <div className="col-span-2 text-right">Giá niêm yết</div>
+                <div className="col-span-2 text-center">Tồn kho</div>
+              </div>
             </div>
+            <div className="col-span-2">Thời gian</div>
+          </div>
 
-            {/* Sync Button */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={syncProducts}
-              disabled={loading || syncing}
-              className="h-8 text-xs"
-            >
-              <RefreshCw className={cn("h-4 w-4 mr-1 md:mr-1.5", (loading || syncing) && "animate-spin")} />
-              <span className="hidden md:inline">{syncing ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}</span>
-              <span className="md:hidden">Sync</span>
-            </Button>
+          {/* Mobile Header */}
+          <div className="md:hidden px-3 py-2 bg-slate-50 border-b text-xs font-medium text-slate-600">
+            Danh sách sản phẩm ({filteredProducts.length})
           </div>
         </div>
 
-        {/* Mobile Search - Only visible on small screens */}
-        <div className="md:hidden p-2 border-b bg-slate-50">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-            <Input
-              placeholder="Tìm theo tên, SKU hoặc ID..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 text-sm h-9"
-            />
-          </div>
-        </div>
-
-        {/* Table Header - Desktop only */}
-        <div className="hidden md:grid grid-cols-12 gap-4 px-4 py-3 bg-slate-50 border-b text-sm font-medium text-slate-600">
-          <div className="col-span-3">Sản phẩm</div>
-          <div className="col-span-7">
-            <div className="grid grid-cols-7 gap-2">
-              <div className="col-span-3">Hàng hóa</div>
-              <div className="col-span-2 text-right">Giá niêm yết</div>
-              <div className="col-span-2 text-center">Tồn kho</div>
+        {/* Scrollable Content Area */}
+        <div className="flex-1 overflow-y-auto">
+          {/* Loading */}
+          {(loading || syncing) && products.length === 0 && (
+            <div className="flex items-center justify-center py-12">
+              <RefreshCw className="h-6 w-6 animate-spin text-orange-500" />
+              <span className="ml-2 text-slate-500">
+                {syncing ? 'Đang đồng bộ từ Shopee...' : 'Đang tải...'}
+              </span>
             </div>
-          </div>
-          <div className="col-span-2">Thời gian</div>
-        </div>
+          )}
 
-        {/* Mobile Header */}
-        <div className="md:hidden px-3 py-2 bg-slate-50 border-b text-xs font-medium text-slate-600">
-          Danh sách sản phẩm ({filteredProducts.length})
-        </div>
+          {/* Empty - chưa có data, cần sync */}
+          {!loading && !syncing && products.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+              <Package className="h-12 w-12 mb-3" />
+              <p className="mb-4">Chưa có dữ liệu sản phẩm</p>
+              <Button onClick={syncProducts} variant="outline" size="sm">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Đồng bộ ngay
+              </Button>
+            </div>
+          )}
 
-        {/* Loading */}
-        {(loading || syncing) && products.length === 0 && (
-          <div className="flex items-center justify-center py-12">
-            <RefreshCw className="h-6 w-6 animate-spin text-orange-500" />
-            <span className="ml-2 text-slate-500">
-              {syncing ? 'Đang đồng bộ từ Shopee...' : 'Đang tải...'}
-            </span>
-          </div>
-        )}
-
-        {/* Empty - chưa có data, cần sync */}
-        {!loading && !syncing && products.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-slate-400">
-            <Package className="h-12 w-12 mb-3" />
-            <p className="mb-4">Chưa có dữ liệu sản phẩm</p>
-            <Button onClick={syncProducts} variant="outline" size="sm">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Đồng bộ ngay
-            </Button>
-          </div>
-        )}
-
-        {/* Product List */}
-        {paginatedProducts.map((product) => {
+          {/* Product List */}
+          {paginatedProducts.map((product) => {
           const isExpanded = expandedItems.has(product.item_id);
           const productModels = modelsData[product.item_id] || [];
           const visibleModels = productModels.slice(0, isExpanded ? undefined : DEFAULT_VISIBLE_MODELS);
@@ -766,9 +811,9 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
           );
         })}
 
-        {/* Footer with Pagination */}
-        {products.length > 0 && (
-          <div className="px-3 md:px-4 py-2 md:py-3 border-t bg-slate-50/50 flex items-center justify-between">
+          {/* Footer with Pagination */}
+          {products.length > 0 && (
+            <div className="px-3 md:px-4 py-2 md:py-3 border-t bg-slate-50/50 flex items-center justify-between">
             <div className="text-xs md:text-sm text-slate-500">
               {syncing && (
                 <span className="text-orange-500 flex items-center gap-1 mr-2">
@@ -849,11 +894,11 @@ export function ProductsPanel({ shopId, userId }: ProductsPanelProps) {
                 >
                   <ChevronRight className="h-4 w-4" />
                 </Button>
-              </div>
-            )}
-          </div>
-        )}
-
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

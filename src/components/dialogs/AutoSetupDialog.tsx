@@ -164,17 +164,33 @@ export function AutoSetupDialog({
       let flashSaleId = copyFromFlashSaleId;
 
       if (!flashSaleId) {
-        const { data: fsData, error: fsError } = await supabase
+        // Ưu tiên lấy FS đang chạy hoặc sắp tới
+        let { data: fsData, error: fsError } = await supabase
           .from('apishopee_flash_sale_data')
           .select('*')
           .eq('shop_id', shopId)
+          .in('type', [1, 2]) // Sắp tới hoặc đang chạy
           .order('start_time', { ascending: false })
           .limit(1)
           .single();
 
         if (fsError && fsError.code !== 'PGRST116') throw fsError;
 
-        if (!fsData || (fsData.type !== 1 && fsData.type !== 2)) {
+        // Nếu không có FS đang chạy/sắp tới, lấy FS mới nhất bất kỳ (bao gồm đã kết thúc)
+        if (!fsData) {
+          const { data: latestFs, error: latestError } = await supabase
+            .from('apishopee_flash_sale_data')
+            .select('*')
+            .eq('shop_id', shopId)
+            .order('start_time', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (latestError && latestError.code !== 'PGRST116') throw latestError;
+          fsData = latestFs;
+        }
+
+        if (!fsData) {
           setTemplateItems([]);
           setLatestFlashSaleId(null);
           return;

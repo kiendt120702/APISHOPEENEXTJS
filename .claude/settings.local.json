@@ -45,7 +45,9 @@
       "mcp__supabase__generate_typescript_types",
       "Bash(find:*)",
       "Bash(git -C /d/Betacom/BetacomShopeeAPI log --oneline -20)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(xargs:*)",
+      "Bash(node -e \"const {execSync} = require\\(''child_process''\\); const result = execSync\\(''npx supabase functions deploy apishopee-order-reports --no-verify-jwt'', {encoding: ''utf-8'', stdio: ''pipe''}\\); console.log\\(result\\);\")"
     ]
   }
 }

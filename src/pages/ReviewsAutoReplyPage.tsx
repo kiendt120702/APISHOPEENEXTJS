@@ -152,52 +152,50 @@ export default function ReviewsAutoReplyPage() {
   );
 
   return (
-    <div className="space-y-4 sm:space-y-6 pb-20 sm:pb-6">
+    <div className="space-y-4 sm:space-y-6 px-4 sm:px-6 pt-4 sm:pt-6 pb-20 sm:pb-6">
       {/* Header - Mobile optimized */}
-      <div className="space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="p-2 bg-orange-100 rounded-lg shrink-0">
-              <Bot className="h-5 w-5 sm:h-6 sm:w-6 text-orange-600" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-lg sm:text-2xl font-bold text-slate-800 truncate">
-                Tự động trả lời
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-500 hidden sm:block">
-                Cấu hình mẫu trả lời cho mỗi mức sao
-              </p>
-            </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="p-2.5 bg-orange-100 rounded-xl shrink-0">
+            <Bot className="h-5 w-5 sm:h-6 sm:w-6 text-orange-600" />
           </div>
-          <Button
-            onClick={() => triggerProcess()}
-            disabled={saving}
-            size="sm"
-            className="bg-green-500 hover:bg-green-600 shrink-0"
-          >
-            {saving ? (
-              <Spinner className="h-4 w-4" />
-            ) : (
-              <>
-                <Play className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Chạy ngay</span>
-              </>
-            )}
-          </Button>
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-2xl font-bold text-slate-800 truncate">
+              Tự động trả lời
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-500 hidden sm:block">
+              Cấu hình mẫu trả lời cho mỗi mức sao
+            </p>
+          </div>
         </div>
+        <Button
+          onClick={() => triggerProcess()}
+          disabled={saving}
+          size="sm"
+          className="bg-green-500 hover:bg-green-600 shrink-0"
+        >
+          {saving ? (
+            <Spinner className="h-4 w-4" />
+          ) : (
+            <>
+              <Play className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Chạy ngay</span>
+            </>
+          )}
+        </Button>
       </div>
 
       {/* Statistics Cards - 2x2 grid on mobile */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
         <Card className="border-0 shadow-sm bg-gradient-to-br from-green-50 to-emerald-50">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg">
-                <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-green-100 rounded-xl shrink-0">
+                <TrendingUp className="h-5 w-5 text-green-600" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-slate-500 truncate">Đã reply</p>
-                <p className="text-lg sm:text-xl font-bold text-slate-800">
+                <p className="text-xl font-bold text-slate-800">
                   {jobStatus?.total_replied || 0}
                 </p>
               </div>
@@ -206,50 +204,44 @@ export default function ReviewsAutoReplyPage() {
         </Card>
 
         <Card className="border-0 shadow-sm bg-gradient-to-br from-blue-50 to-indigo-50">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1.5 sm:p-2 bg-blue-100 rounded-lg">
-                <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-blue-100 rounded-xl shrink-0">
+                <CheckCircle2 className="h-5 w-5 text-blue-600" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-slate-500 truncate">Thành công</p>
-                <p className="text-lg sm:text-xl font-bold text-slate-800">{successRate}%</p>
+                <p className="text-xl font-bold text-slate-800">{successRate}%</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
         <Card className="border-0 shadow-sm bg-gradient-to-br from-purple-50 to-violet-50">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1.5 sm:p-2 bg-purple-100 rounded-lg">
-                <Activity className="h-4 w-4 sm:h-5 sm:w-5 text-purple-600" />
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-purple-100 rounded-xl shrink-0">
+                <Activity className="h-5 w-5 text-purple-600" />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-slate-500 truncate">24h qua</p>
-                <p className="text-lg sm:text-xl font-bold text-slate-800">{last24hLogs.length}</p>
+                <p className="text-xl font-bold text-slate-800">{last24hLogs.length}</p>
               </div>
             </div>
           </CardContent>
         </Card>
 
         <Card className="border-0 shadow-sm bg-gradient-to-br from-orange-50 to-amber-50">
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1.5 sm:p-2 bg-orange-100 rounded-lg">
-                <Zap className={cn('h-4 w-4 sm:h-5 sm:w-5', config?.enabled ? 'text-orange-600' : 'text-slate-400')} />
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-orange-100 rounded-xl shrink-0">
+                <Zap className={cn('h-5 w-5', config?.enabled ? 'text-orange-600' : 'text-slate-400')} />
               </div>
               <div className="min-w-0">
                 <p className="text-xs text-slate-500 truncate">Trạng thái</p>
-                <div className="mt-0.5">
-                  {jobStatus?.is_running ? (
-                    <Badge className="bg-green-500 text-[10px] sm:text-xs px-1.5 py-0">Đang chạy</Badge>
-                  ) : config?.enabled ? (
-                    <Badge className="bg-blue-500 text-[10px] sm:text-xs px-1.5 py-0">Đã bật</Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[10px] sm:text-xs px-1.5 py-0">Đã tắt</Badge>
-                  )}
-                </div>
+                <p className="text-base font-semibold text-slate-800">
+                  {jobStatus?.is_running ? 'Đang chạy' : config?.enabled ? 'Đã bật' : 'Đã tắt'}
+                </p>
               </div>
             </div>
           </CardContent>
@@ -258,10 +250,10 @@ export default function ReviewsAutoReplyPage() {
 
       {/* Main Toggle - Compact on mobile */}
       <Card className="border-orange-200 bg-gradient-to-r from-orange-50 to-yellow-50">
-        <CardContent className="p-4 sm:p-6">
+        <CardContent className="p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="p-2 sm:p-3 bg-orange-100 rounded-xl shrink-0">
+              <div className="p-2.5 bg-orange-100 rounded-xl shrink-0">
                 <Zap className="h-5 w-5 sm:h-6 sm:w-6 text-orange-600" />
               </div>
               <div className="min-w-0">

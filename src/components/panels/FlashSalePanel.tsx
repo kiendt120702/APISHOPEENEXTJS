@@ -31,6 +31,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useSyncData } from '@/hooks/useSyncData';
 import { useFlashSaleData } from '@/hooks/useRealtimeData';
 import { supabase } from '@/lib/supabase';
+import { logCompletedActivity } from '@/lib/activity-logger';
 import {
   FlashSale,
   FilterType,
@@ -82,8 +83,8 @@ function getErrorMessage(error: string): string {
   return ERROR_MESSAGES[error] || error;
 }
 
-// Auto sync interval: 1 hour in milliseconds
-const AUTO_SYNC_INTERVAL = 60 * 60 * 1000;
+// Auto sync interval: 30 minutes in milliseconds
+const AUTO_SYNC_INTERVAL = 30 * 60 * 1000;
 
 export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
   const { toast } = useToast();
@@ -114,7 +115,7 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
 
   const { data: flashSales, loading, error, refetch, dataUpdatedAt } = useFlashSaleData(shopId, userId);
 
-  // Auto sync from Shopee API every 1 hour
+  // Auto sync from Shopee API every 30 minutes
   const autoSyncIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -125,7 +126,7 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
 
     // Set up auto sync interval
     autoSyncIntervalRef.current = setInterval(async () => {
-      console.log('[FlashSalePanel] Auto-sync triggered (every 1 hour)');
+      console.log('[FlashSalePanel] Auto-sync triggered (every 30 minutes)');
       try {
         // Sync từ Shopee API
         await triggerSync(true);
@@ -192,6 +193,7 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
     if (!canToggle(sale)) return;
 
     setTogglingId(sale.flash_sale_id);
+    const startTime = new Date();
     // Status: 1 = Enabled, 2 = Disabled - handle cả string và number
     const currentStatus = Number(sale.status);
     const newStatus = currentStatus === 1 ? 2 : 1;
@@ -220,12 +222,43 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
         description: `Đã ${newStatus === 1 ? 'bật' : 'tắt'} Flash Sale`,
       });
 
+      // Log activity
+      logCompletedActivity({
+        userId,
+        shopId,
+        actionType: 'flash_sale_toggle',
+        actionCategory: 'flash_sale',
+        actionDescription: `${newStatus === 1 ? 'Bật' : 'Tắt'} Flash Sale #${sale.flash_sale_id}`,
+        status: 'success',
+        source: 'manual',
+        startedAt: startTime,
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime.getTime(),
+        targetType: 'flash_sale',
+        targetId: String(sale.flash_sale_id),
+      });
+
       refetch();
     } catch (err) {
       toast({
         title: 'Lỗi',
         description: (err as Error).message,
         variant: 'destructive',
+      });
+
+      // Log failed activity
+      logCompletedActivity({
+        userId,
+        shopId,
+        actionType: 'flash_sale_toggle',
+        actionCategory: 'flash_sale',
+        actionDescription: `${newStatus === 1 ? 'Bật' : 'Tắt'} Flash Sale thất bại`,
+        status: 'failed',
+        source: 'manual',
+        startedAt: startTime,
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime.getTime(),
+        errorMessage: (err as Error).message,
       });
     } finally {
       setTogglingId(null);
@@ -250,13 +283,15 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
     if (!selectedSale) return;
 
     setIsDeleting(true);
+    const startTime = new Date();
+    const flashSaleId = selectedSale.flash_sale_id;
 
     try {
       const { data, error } = await supabase.functions.invoke('apishopee-flash-sale', {
         body: {
           action: 'delete-flash-sale',
           shop_id: shopId,
-          flash_sale_id: selectedSale.flash_sale_id,
+          flash_sale_id: flashSaleId,
         },
       });
 
@@ -269,12 +304,44 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
         .eq('id', selectedSale.id);
 
       toast({ title: 'Thành công', description: 'Đã xóa Flash Sale' });
+
+      // Log activity
+      logCompletedActivity({
+        userId,
+        shopId,
+        actionType: 'flash_sale_delete',
+        actionCategory: 'flash_sale',
+        actionDescription: `Xóa Flash Sale #${flashSaleId}`,
+        status: 'success',
+        source: 'manual',
+        startedAt: startTime,
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime.getTime(),
+        targetType: 'flash_sale',
+        targetId: String(flashSaleId),
+      });
+
       refetch();
     } catch (err) {
       toast({
         title: 'Lỗi',
         description: (err as Error).message,
         variant: 'destructive',
+      });
+
+      // Log failed activity
+      logCompletedActivity({
+        userId,
+        shopId,
+        actionType: 'flash_sale_delete',
+        actionCategory: 'flash_sale',
+        actionDescription: `Xóa Flash Sale #${flashSaleId} thất bại`,
+        status: 'failed',
+        source: 'manual',
+        startedAt: startTime,
+        completedAt: new Date(),
+        durationMs: Date.now() - startTime.getTime(),
+        errorMessage: (err as Error).message,
       });
     } finally {
       setIsDeleting(false);
@@ -466,10 +533,10 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
   }
 
   return (
-    <Card className="border-0 shadow-sm h-full flex flex-col">
-      <CardContent className="p-0 flex-1 flex flex-col min-h-0">
-        {/* Header with Tabs and Refresh Button */}
-        <div className="border-b">
+    <Card className="border-0 shadow-sm flex flex-col h-[calc(100vh-73px)]">
+      <CardContent className="p-0 flex flex-col h-full overflow-hidden">
+        {/* Sticky Header Section */}
+        <div className="flex-shrink-0 border-b">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 md:gap-0">
             <div className="flex w-full md:w-auto overflow-x-auto no-scrollbar pl-4 md:pl-0">
               {TABS.map((tab) => {
@@ -519,8 +586,10 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
           </div>
         </div>
 
-        {/* Mobile List View */}
-        <div className="md:hidden flex-1 overflow-y-auto">
+        {/* Scrollable Content Area */}
+        <div className="flex-1 overflow-y-auto">
+          {/* Mobile List View */}
+          <div className="md:hidden">
           {loading ? (
             <div className="p-8 text-center text-slate-500">Đang tải dữ liệu...</div>
           ) : filteredData.length === 0 ? (
@@ -638,36 +707,37 @@ export function FlashSalePanel({ shopId, userId }: FlashSalePanelProps) {
           )}
         </div>
 
-        {/* Desktop Table */}
-        <div className="hidden md:block">
-          <DataTable
-            columns={columns}
-            data={filteredData}
-            loading={loading}
-            loadingMessage="Đang tải dữ liệu..."
-            emptyMessage={
-              flashSales.length === 0
-                ? 'Chưa có Flash Sale nào. Nhấn "Lấy dữ liệu từ Shopee" để đồng bộ.'
-                : 'Không có Flash Sale nào phù hợp với bộ lọc.'
-            }
-            pageSize={20}
-            showPagination={true}
-          />
-        </div>
-
-        {/* Last sync info */}
-        {(lastSyncedAt || dataUpdatedAt) && (
-          <div className="px-4 py-2 border-t bg-slate-50/50 text-xs text-slate-400 flex items-center justify-between">
-            <span>
-              {lastSyncedAt && `Đồng bộ Shopee: ${formatDateTime(new Date(lastSyncedAt).getTime() / 1000)}`}
-              {lastSyncedAt && dataUpdatedAt && ' • '}
-              {dataUpdatedAt && `Cập nhật UI: ${formatDateTime(dataUpdatedAt / 1000)}`}
-            </span>
-            <span className="text-slate-300">
-              Tự động làm mới mỗi 1 giờ
-            </span>
+          {/* Desktop Table */}
+          <div className="hidden md:block">
+            <DataTable
+              columns={columns}
+              data={filteredData}
+              loading={loading}
+              loadingMessage="Đang tải dữ liệu..."
+              emptyMessage={
+                flashSales.length === 0
+                  ? 'Chưa có Flash Sale nào. Nhấn "Lấy dữ liệu từ Shopee" để đồng bộ.'
+                  : 'Không có Flash Sale nào phù hợp với bộ lọc.'
+              }
+              pageSize={20}
+              showPagination={true}
+            />
           </div>
-        )}
+
+          {/* Last sync info */}
+          {(lastSyncedAt || dataUpdatedAt) && (
+            <div className="px-4 py-2 border-t bg-slate-50/50 text-xs text-slate-400 flex items-center justify-between">
+              <span>
+                {lastSyncedAt && `Đồng bộ Shopee: ${formatDateTime(new Date(lastSyncedAt).getTime() / 1000)}`}
+                {lastSyncedAt && dataUpdatedAt && ' • '}
+                {dataUpdatedAt && `Cập nhật UI: ${formatDateTime(dataUpdatedAt / 1000)}`}
+              </span>
+              <span className="text-slate-300">
+                Tự động làm mới mỗi 1 giờ
+              </span>
+            </div>
+          )}
+        </div>
       </CardContent>
 
       {/* Delete confirmation dialog */}

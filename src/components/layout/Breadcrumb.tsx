@@ -24,7 +24,7 @@ const routeNames: Record<string, string> = {
   'shops': 'Quản lý Shop',
   'users': 'Quản lý người dùng',
   'advanced': 'Quản lý nâng cao',
-  'analytics': 'Phân tích',
+  'analytics': 'Báo cáo',
 };
 
 // Parent route names for nested routes
@@ -35,7 +35,7 @@ const parentRouteNames: Record<string, string> = {
   'flash-sale': 'Flash Sale',
   'settings': 'Cài đặt',
   'ads': 'Quảng cáo',
-  'analytics': 'Phân tích',
+  'analytics': 'Báo cáo',
 };
 
 // Child route display names (when showing as last item)
@@ -60,9 +60,9 @@ const childRouteNames: Record<string, Record<string, string>> = {
     'history': 'Lịch sử',
   },
   'analytics': {
-    'orders': 'Phân tích đơn hàng',
-    'reviews': 'Phân tích đánh giá',
-    'campaigns': 'Phân tích chiến dịch',
+    'orders': 'Báo cáo đơn hàng',
+    'reviews': 'Báo cáo đánh giá',
+    'campaigns': 'Báo cáo chiến dịch',
   },
 };
 
@@ -148,7 +148,7 @@ export default function Breadcrumb({ onMobileMenuClick }: BreadcrumbProps) {
   }
 
   return (
-    <div className="bg-white border-b border-slate-200 px-6 h-[73px] flex items-center">
+    <div className="bg-white border-b border-slate-200 px-6 h-[73px] flex items-center sticky top-0 z-30">
       <div className="flex items-center justify-between w-full">
         {/* Mobile Menu Toggle */}
         <button
